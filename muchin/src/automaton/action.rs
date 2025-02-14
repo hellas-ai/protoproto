@@ -71,9 +71,9 @@ pub struct ActionDebugInfo {
     pub location_line: u32,
     pub depth: usize,
     pub action_id: u64,
-    // action id of caller action
+    /// action id of caller action
     pub caller: u64,
-    // Was the action dispatched with dispatch_back.
+    /// Was the action dispatched with dispatch_back.
     pub callback: bool,
 }
 
@@ -198,6 +198,10 @@ impl Dispatcher {
 
     pub fn halt(&mut self) {
         self.halt = true;
+    }
+
+    pub fn unhalt(&mut self) {
+        self.halt = false;
     }
 
     pub fn is_halted(&self) -> bool {

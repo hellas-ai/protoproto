@@ -21,3 +21,10 @@ gensym = "0.1.1"
 linkme = "0.3.31"
 paste = "1.0.15"
 muchin_model_state_derive = { version = "0.1", path = "./model_state_derive" }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "automaton"
+harness = false

@@ -95,23 +95,32 @@ impl<Substate: ModelState> Runner<Substate> {
     /// State-machine main loop. If the runner contains more than one instance,
     /// it interleaves the processing of actions fairly for each instance.
     pub fn run(&mut self) {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-            .format(|buf, record| writeln!(buf, "[{}] {}", record.level(), record.args()))
-            .init();
-
         loop {
-            for instance in 0..self.dispatchers.len() {
-                self.state.set_current_instance(instance);
-                let dispatcher = &mut self.dispatchers[instance];
-
-                if dispatcher.is_halted() {
-                    return;
-                }
-
-                let action = dispatcher.next_action();
-                self.process_action(action, instance)
+            if self.step() {
+                return;
             }
         }
+    }
+
+    pub fn unhalt(&mut self) {
+        for dispatcher in self.dispatchers.iter_mut() {
+            dispatcher.unhalt();
+        }
+    }
+
+    pub fn step(&mut self) -> bool {
+        for instance in 0..self.dispatchers.len() {
+            self.state.set_current_instance(instance);
+            let dispatcher = &mut self.dispatchers[instance];
+
+            if dispatcher.is_halted() {
+                return true;
+            }
+
+            let action = dispatcher.next_action();
+            self.process_action(action, instance)
+        }
+        false
     }
 
     fn process_action(&mut self, action: AnyAction, instance: usize) {

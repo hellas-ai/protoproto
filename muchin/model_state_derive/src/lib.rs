@@ -19,21 +19,21 @@ pub fn model_state_derive(input: TokenStream) -> TokenStream {
                     let prev_state_mut_code = state_mut_code;
 
                     state_code = quote! {
-                        <dyn Any>::downcast_ref::<T>(&self.#field_name).unwrap_or_else(|| #prev_state_code)
+                        <dyn ::core::any::Any>::downcast_ref::<T>(&self.#field_name).unwrap_or_else(|| #prev_state_code)
                     };
 
                     state_mut_code = quote! {
-                        <dyn Any>::downcast_mut::<T>(&mut self.#field_name).unwrap_or_else(|| #prev_state_mut_code)
+                        <dyn ::core::any::Any>::downcast_mut::<T>(&mut self.#field_name).unwrap_or_else(|| #prev_state_mut_code)
                     };
                 }
 
                 let expanded = quote! {
                     impl ModelState for #name {
-                        fn state<T: 'static + Any>(&self) -> &T {
+                        fn state<T: 'static + ::core::any::Any>(&self) -> &T {
                             #state_code
                         }
 
-                        fn state_mut<T: 'static + Any>(&mut self) -> &mut T {
+                        fn state_mut<T: 'static + ::core::any::Any>(&mut self) -> &mut T {
                             #state_mut_code
                         }
                     }
@@ -65,12 +65,12 @@ pub fn model_state_derive(input: TokenStream) -> TokenStream {
 
             let expanded = quote! {
                 impl ModelState for #name {
-                    fn state<T: 'static + Any>(&self) -> &T {
+                    fn state<T: 'static + ::core::any::Any>(&self) -> &T {
                         match self {
                             #(#state_arms),*
                         }
                     }
-                    fn state_mut<T: 'static + Any>(&mut self) -> &mut T {
+                    fn state_mut<T: 'static + ::core::any::Any>(&mut self) -> &mut T {
                         match self {
                             #(#state_mut_arms),*
                         }
