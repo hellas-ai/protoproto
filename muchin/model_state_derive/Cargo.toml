@@ -1,0 +1,15 @@
+[package]
+name = "muchin_model_state_derive"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = [ "OpenMina Team", "ember arlynx <ember@hellas.ai>" ]
+description = "Derive macros for muchin model state"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "2"
+quote = "1.0.9"
+proc-macro2 = "1.0.24"

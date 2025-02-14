@@ -1,0 +1,11 @@
+[package]
+name = "native-node"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+libp2p = { version = "0.55", features = ["tokio", "full"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+argh = "0.1"
