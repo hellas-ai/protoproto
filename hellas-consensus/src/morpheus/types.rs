@@ -4,7 +4,6 @@ use std::fmt;
 use std::hash::{Hash as StdHash, Hasher};
 use std::time::{Duration, Instant};
 use serde::{Serialize, Deserialize};
-use type_uuid::TypeUuid;
 
 /// Wrapper type for view numbers
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug, Default)]
@@ -13,12 +12,6 @@ pub struct View(pub u64);
 impl fmt::Display for View {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "v{}", self.0)
-    }
-}
-
-impl StdHash for View {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
     }
 }
 
@@ -32,12 +25,6 @@ impl fmt::Display for Height {
     }
 }
 
-impl StdHash for Height {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
 /// Wrapper type for slot numbers
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug, Default)]
 pub struct Slot(pub u64);
@@ -48,25 +35,13 @@ impl fmt::Display for Slot {
     }
 }
 
-impl StdHash for Slot {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
 /// Process ID
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug, Default)]
 pub struct ProcessId(pub usize);
 
 impl fmt::Display for ProcessId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "p{}", self.0)
-    }
-}
-
-impl StdHash for ProcessId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
     }
 }
 
@@ -81,9 +56,9 @@ pub enum BlockType {
     Transaction,
 }
 
-impl StdHash for BlockType {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        (*self as u8).hash(state);
+impl Default for BlockType {
+    fn default() -> Self {
+        BlockType::Genesis
     }
 }
 
@@ -107,8 +82,14 @@ pub enum ThroughputPhase {
     Low = 1,
 }
 
+impl Default for ThroughputPhase {
+    fn default() -> Self {
+        ThroughputPhase::High
+    }
+}
+
 /// Cryptographic hash placeholder
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug)]
 pub struct Hash(pub Vec<u8>);
 
 impl Hash {
@@ -125,8 +106,14 @@ impl StdHash for Hash {
     }
 }
 
+impl Default for Hash {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
 /// Transaction representation
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct Transaction {
     pub data: Vec<u8>,
     // In a real implementation, would include sender, nonce, etc.
@@ -149,6 +136,12 @@ pub enum VoteType {
     Vote2 = 2,
 }
 
+impl Default for VoteType {
+    fn default() -> Self {
+        VoteType::Vote0
+    }
+}
+
 impl VoteType {
     /// Get the numeric value of the vote type
     pub fn value(&self) -> u8 {
@@ -166,15 +159,15 @@ impl VoteType {
 }
 
 /// Threshold signature placeholder
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct ThresholdSignature(pub Vec<u8>);
 
 /// Signature placeholder
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct Signature(pub Vec<u8>);
 
 /// Vote representation
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct Vote {
     /// Type of vote (0, 1, or 2)
     pub vote_type: VoteType,
@@ -197,7 +190,7 @@ pub struct Vote {
 }
 
 /// Quorum Certificate (QC)
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct QC {
     /// Type of votes in this QC
     pub vote_type: VoteType,
@@ -248,7 +241,7 @@ pub struct BlockPointer {
 }
 
 /// Block structure
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct Block {
     /// Type of block (gen, Tr, or lead)
     pub block_type: BlockType,
@@ -273,7 +266,7 @@ pub struct Block {
 }
 
 /// View message sent at the start of a view
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct ViewMessage {
     /// View number
     pub view: View,
@@ -286,7 +279,7 @@ pub struct ViewMessage {
 }
 
 /// End-view message
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct EndViewMessage {
     /// View to end
     pub view: View,
@@ -296,8 +289,8 @@ pub struct EndViewMessage {
     pub signature: Signature,
 }
 
-/// View certificate formed from f+1 end-view messages
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug)]
+/// View certificate for view change
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Debug, Default)]
 pub struct ViewCertificate {
     /// Next view
     pub view: View,

@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 use log::{debug, info, warn};
-use muchin::automaton::{Dispatcher, callback};
+use muchin::automaton::Dispatcher;
+use muchin::callback;
 
-use crate::types::*;
-use crate::state::MorpheusState;
-use crate::actions::{ViewChangeAction, NetworkAction, MorpheusAction};
+use super::types::*;
+use super::state::MorpheusState;
+use super::actions::{ViewChangeAction, NetworkAction, MorpheusAction};
 
 /// View State - Extracted from MorpheusState for view-specific operations
 #[derive(Debug)]

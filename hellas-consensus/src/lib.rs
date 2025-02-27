@@ -1,3 +1,6 @@
+#![feature(generic_const_exprs)]
+#![allow(incomplete_features)]
+
 pub mod morpheus;
 
 pub fn add(left: u64, right: u64) -> u64 {

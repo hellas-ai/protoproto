@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use log::{debug, warn};
 
-use crate::types::*;
-use crate::state::MorpheusState;
+use super::types::*;
+use super::state::MorpheusState;
 
 /// Result of block ordering
 #[derive(Debug, Clone)]

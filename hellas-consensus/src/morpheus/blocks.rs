@@ -1,11 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 use log::{debug, warn};
-use muchin::automaton::{Dispatcher, callback};
+use muchin::automaton::Dispatcher;
+use muchin::callback;
 
-use crate::types::*;
-use crate::state::MorpheusState;
-use crate::actions::{BlockAction, NetworkAction, MorpheusAction};
+use super::types::*;
+use super::state::MorpheusState;
+use super::actions::{BlockAction, NetworkAction, MorpheusAction, VotingAction, ViewChangeAction};
 
 /// Constants for block handling
 pub const MAX_TIPS_PER_LEADER_BLOCK: usize = 100;
@@ -487,7 +488,7 @@ pub fn process_block(
             // Handle view change if block has higher view
             if block.view.0 > state.current_view.0 {
                 dispatcher.dispatch(MorpheusAction::ViewChange(
-                    crate::view_change::ViewChangeAction::UpdateView { 
+                    ViewChangeAction::UpdateView { 
                         new_view: block.view 
                     }
                 ));
@@ -495,7 +496,7 @@ pub fn process_block(
             
             // Vote for the block if eligible
             dispatcher.dispatch(MorpheusAction::Voting(
-                crate::voting::VotingAction::CheckVoteEligibility { 
+                VotingAction::CheckVoteEligibility { 
                     block: block.clone(),
                     block_hash: hash.clone()
                 }
@@ -784,7 +785,7 @@ pub fn handle_create_transaction_block(
         on_success: callback!(|(block: Block, hash: Hash)| 
             MorpheusAction::Block(BlockAction::BlockCreated { block, hash })),
         on_error: callback!(|error: String| 
-            MorpheusAction::ViewChange(crate::view_change::ViewChangeAction::SendEndView { 
+            MorpheusAction::ViewChange(ViewChangeAction::SendEndView { 
                 view: state.current_view 
             })),
     });
@@ -806,7 +807,7 @@ pub fn handle_create_leader_block(
             on_success: callback!(|(block: Block, hash: Hash)| 
                 MorpheusAction::Block(BlockAction::BlockCreated { block, hash })),
             on_error: callback!(|error: String| 
-                MorpheusAction::ViewChange(crate::view_change::ViewChangeAction::SendEndView {
+                MorpheusAction::ViewChange(ViewChangeAction::SendEndView {
                     view: state.current_view 
                 })),
         });

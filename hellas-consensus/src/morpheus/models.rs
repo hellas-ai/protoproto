@@ -2,16 +2,17 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use muchin::automaton::{
     Dispatcher, EffectfulModel, Effectful, ModelState, PureModel, 
-    RegisterModel, RunnerBuilder, State, Uid, callback
+    RegisterModel, RunnerBuilder, State, Uid
 };
+use muchin::callback;
 use log::{debug, info, warn};
 
-use crate::state::MorpheusState;
-use crate::actions::{MorpheusAction, NetworkAction, BlockAction, VotingAction, ViewChangeAction};
-use crate::types::*;
-use crate::blocks;
-use crate::voting;
-use crate::view_change;
+use super::state::MorpheusState;
+use super::actions::{MorpheusAction, NetworkAction, BlockAction, VotingAction, ViewChangeAction};
+use super::types::*;
+use super::blocks;
+use super::voting;
+use super::view_change;
 
 /// Pure model for the Morpheus protocol
 pub struct MorpheusModel;

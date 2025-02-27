@@ -1,11 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
+use muchin::automaton::ModelState;
 use muchin_model_state_derive::ModelState;
 
-use crate::types::*;
-use crate::blocks::BlockState;
-use crate::voting::VoteState;
-use crate::view_change::ViewState;
+use super::types::*;
+use super::blocks::BlockState;
+use super::voting::VoteState;
+use super::view_change::ViewState;
 
 /// Main state for the Morpheus protocol
 ///

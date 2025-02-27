@@ -2,11 +2,11 @@ use muchin::automaton::{Action, ActionKind, Redispatch, Uid};
 use serde::{Deserialize, Serialize};
 use type_uuid::TypeUuid;
 
-use crate::types::*;
+use super::types::*;
 
 /// Block-related actions
 #[derive(Clone, PartialEq, Eq, TypeUuid, Serialize, Deserialize, Debug)]
-#[uuid = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a101"]
+#[uuid = "f8a7b6c5-d4e3-42f1-b0a9-c8d7e6f5a4b3"]
 pub enum BlockAction {
     /// Process a received block
     ProcessBlock {
@@ -28,7 +28,7 @@ pub enum BlockAction {
 
 /// Voting-related actions
 #[derive(Clone, PartialEq, Eq, TypeUuid, Serialize, Deserialize, Debug)]
-#[uuid = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a102"]
+#[uuid = "e7d6c5b4-a3f2-41e0-9d8c-b7a6f5e4d3c2"]
 pub enum VotingAction {
     /// Process a received vote
     ProcessVote {
@@ -66,7 +66,7 @@ pub enum VotingAction {
 
 /// View change-related actions
 #[derive(Clone, PartialEq, Eq, TypeUuid, Serialize, Deserialize, Debug)]
-#[uuid = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a103"]
+#[uuid = "d6c5b4a3-92e1-40df-8c7b-a6f5e4d3c2b1"]
 pub enum ViewChangeAction {
     /// Process an end-view message
     ProcessEndView {
@@ -106,7 +106,7 @@ pub enum ViewChangeAction {
 
 /// Unified action type for Morpheus protocol
 #[derive(Clone, PartialEq, Eq, TypeUuid, Serialize, Deserialize, Debug)]
-#[uuid = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a100"]
+#[uuid = "c5b4a392-81d0-4cde-7b6a-f5e4d3c2b1a0"]
 pub enum MorpheusAction {
     /// Block-related actions
     Block(BlockAction),
@@ -139,7 +139,7 @@ impl Action for ViewChangeAction {
 
 /// Network-related actions (effectful)
 #[derive(Clone, PartialEq, Eq, TypeUuid, Serialize, Deserialize, Debug)]
-#[uuid = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a200"]
+#[uuid = "b4a39281-70cf-4bcd-6a59-e4d3c2b1a098"]
 pub enum NetworkAction {
     /// Broadcast a block to all processes
     BroadcastBlock {
