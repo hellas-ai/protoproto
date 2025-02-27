@@ -1,0 +1,268 @@
+// ===== Derived Relations =====
+
+// Derive the 'observes' relation (transitive closure)
+observes(B, B) :- block(B, _, _, _, _, _).  // A block observes itself
+observes(B1, B3) :- points_to(B1, B2), observes(B2, B3).  // Transitive closure
+
+// Determine if a block is a single tip for a process
+block_is_single_tip(P, B) :- 
+    process_received_block(P, B),
+    !exists B2 (
+        process_received_block(P, B2), 
+        !observes(B, B2), 
+        !observes(B2, B),
+        B != B2
+    ).
+
+// Determine if a QC is a single tip
+qc_is_single_tip(P, Q) :-
+    process_received_qc(P, Q),
+    qc(Q, _, B, _, _, _, _, _),
+    block_is_single_tip(P, B).
+
+// Determine if a QC is finalized
+qc_finalized(P, Q) :-
+    process_received_qc(P, Q),
+    process_received_qc(P, Q2),
+    qc(Q2, 2, B2, _, _, _, _, _),  // Must be a 2-QC
+    qc(Q, _, B1, _, _, _, _, _),
+    observes(B2, B1).
+
+// ===== View Change Rules =====
+
+// Should form a new view certificate
+should_form_new_view_certificate(P, V) :-
+    process_view(P, CurV),
+    V >= CurV,
+    count({ M | 
+        process_received_message(P, M), 
+        message(M, "end-view", _, V) 
+    }) >= f + 1,
+    !exists V2 (
+        V2 > V,
+        count({ M2 | 
+            process_received_message(P, M2), 
+            message(M2, "end-view", _, V2) 
+        }) >= f + 1
+    ).
+
+// Should update view
+should_update_view(P, V) :-
+    process_view(P, CurV),
+    V > CurV,
+    (
+        exists M (
+            process_received_message(P, M), 
+            message(M, "v-certificate", _, V)
+        );
+        exists Q (
+            process_received_qc(P, Q), 
+            qc(Q, _, _, _, V, _, _, _)
+        )
+    ),
+    !exists V2 (
+        V2 > V,
+        (
+            exists M2 (
+                process_received_message(P, M2), 
+                message(M2, "v-certificate", _, V2)
+            );
+            exists Q2 (
+                process_received_qc(P, Q2), 
+                qc(Q2, _, _, _, V2, _, _, _)
+            )
+        )
+    ).
+
+// ===== Voting Rules =====
+
+// Should send a 0-vote for a block
+should_send_0vote(P, B) :-
+    process_received_block(P, B),
+    block(B, Type, _, _, Auth, Slot),
+    !process_voted(P, 0, Type, Slot, Auth).
+
+// Should form a 0-QC
+should_form_0qc(P, B) :-
+    block(B, _, _, _, P, _),  // Block authored by P
+    count({ V | 
+        process_received_vote(P, V), 
+        vote(V, 0, B, _) 
+    }) >= n - f,
+    !exists Q (
+        qc(Q, 0, B, _, _, _, _, _),
+        process_sent_message(P, M),
+        message(M, "0-qc", P, Q)
+    ).
+
+// Should send a 1-vote for a transaction block
+should_send_1vote_tr(P, B) :-
+    process_view(P, V),
+    block(B, "Tr", V, _, Auth, Slot),
+    process_received_block(P, B),
+    block_is_single_tip(P, B),
+    block_1qc_valid(P, B),
+    !process_voted(P, 1, "Tr", Slot, Auth),
+    // Additional conditions from Algorithm 1 lines 36-37
+    exists L (
+        process_received_block(P, L),
+        block(L, "lead", V, _, _, _),
+        qc_finalized(P, LQ),
+        qc(LQ, _, L, _, _, _, _, _)
+    ),
+    !exists UL (
+        process_received_block(P, UL),
+        block(UL, "lead", V, _, _, _),
+        !exists ULQ (
+            qc_finalized(P, ULQ),
+            qc(ULQ, _, UL, _, _, _, _, _)
+        )
+    ).
+
+// Should send a 2-vote for a transaction block
+should_send_2vote_tr(P, B) :-
+    process_view(P, V),
+    process_received_qc(P, Q),
+    qc(Q, 1, B, "Tr", V, H, Auth, Slot),
+    qc_is_single_tip(P, Q),
+    !process_voted(P, 2, "Tr", Slot, Auth),
+    !exists B2 (
+        process_received_block(P, B2),
+        block(B2, _, _, H2, _, _),
+        H2 > H
+    ),
+    // Same conditions as 1-vote from lines 36-37
+    exists L (
+        process_received_block(P, L),
+        block(L, "lead", V, _, _, _),
+        qc_finalized(P, LQ),
+        qc(LQ, _, L, _, _, _, _, _)
+    ),
+    !exists UL (
+        process_received_block(P, UL),
+        block(UL, "lead", V, _, _, _),
+        !exists ULQ (
+            qc_finalized(P, ULQ),
+            qc(ULQ, _, UL, _, _, _, _, _)
+        )
+    ).
+
+// Should send a 1-vote for a leader block
+should_send_1vote_lead(P, B) :-
+    process_view(P, V),
+    process_phase(P, V, 0),  // Must be in phase 0
+    process_received_block(P, B),
+    block(B, "lead", V, _, Auth, Slot),
+    !process_voted(P, 1, "lead", Slot, Auth).
+
+// Should send a 2-vote for a leader block
+should_send_2vote_lead(P, B) :-
+    process_view(P, V),
+    process_phase(P, V, 0),  // Must be in phase 0
+    process_received_qc(P, Q),
+    qc(Q, 1, B, "lead", V, _, Auth, Slot),
+    !process_voted(P, 2, "lead", Slot, Auth).
+
+// ===== Block Creation Rules =====
+
+// Should create a transaction block
+should_create_tr_block(P) :-
+    payload_ready(P).
+
+// Get previous pointers for a transaction block
+tr_block_prev_pointers(P, S, Result) :-
+    process_slot(P, "Tr", S),
+    (
+        S > 0,
+        process_received_qc(P, Q1), 
+        qc(Q1, _, _, "Tr", _, _, P, S-1),
+        Result = {Q1}
+    );
+    (
+        S = 0,
+        genesis_qc(Q1),
+        Result = {Q1}
+    ),
+    exists Q2 (
+        qc_is_single_tip(P, Q2),
+        Result = Result ∪ {Q2}
+    ).
+
+// Should create a leader block
+should_create_leader_block(P) :-
+    process_view(P, V),
+    leader(V) = P,
+    leader_ready(P),
+    process_phase(P, V, 0),
+    !exists Q (qc_is_single_tip(P, Q)).
+
+// ===== Complaint Rules =====
+
+// Should send complaint to leader
+should_send_complaint(P, Q) :-
+    process_view(P, V),
+    leader(V, L),
+    process_received_qc(P, Q),
+    !qc_finalized(P, Q),
+    max_unfinalized_qc(P, Q),
+    process_entered_view(P, V, EntryTime),
+    current_time(P, CurrentTime),
+    CurrentTime - EntryTime >= 6*Δ,
+    !previously_sent_to_leader(P, V, Q).
+
+// Should send end-view message
+should_send_end_view(P) :-
+    process_view(P, V),
+    exists Q (
+        process_received_qc(P, Q),
+        !qc_finalized(P, Q),
+        process_entered_view(P, V, EntryTime),
+        current_time(P, CurrentTime),
+        CurrentTime - EntryTime >= 12*Δ
+    ).
+
+// ===== Helper Rules =====
+
+// Maximum 1-QC seen by a process
+max_1qc(P, Q) :-
+    process_received_qc(P, Q),
+    qc(Q, 1, _, _, V, H, _, _),
+    !exists Q2 (
+        process_received_qc(P, Q2),
+        qc(Q2, 1, _, _, V2, H2, _, _),
+        (V2 > V) | (V2 = V & H2 > H)
+    ).
+
+// Is leader ready to produce a block
+leader_ready(P) :-
+    process_view(P, V),
+    process_slot(P, "lead", S),
+    (
+        // First leader block case
+        !exists B (
+            block(B, "lead", V, _, P, _),
+            process_received_block(P, B)
+        ),
+        count({ M | 
+            process_received_message(P, M), 
+            message(M, "view-v", _, V) 
+        }) >= n - f,
+        (
+            S = 0;
+            exists Q (
+                process_received_qc(P, Q),
+                qc(Q, _, _, "lead", _, _, P, S-1)
+            )
+        )
+    );
+    (
+        // Subsequent leader blocks case
+        exists B (
+            block(B, "lead", V, _, P, _),
+            process_received_block(P, B)
+        ),
+        exists Q (
+            process_received_qc(P, Q),
+            qc(Q, 1, B2, "lead", _, _, P, S-1)
+        )
+    ).
