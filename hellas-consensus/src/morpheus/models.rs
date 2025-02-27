@@ -2,7 +2,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use muchin::automaton::{
     Dispatcher, EffectfulModel, Effectful, ModelState, PureModel, 
-    RegisterModel, RunnerBuilder, State, Uid
+    RegisterModel, RunnerBuilder, State
 };
 use muchin::callback;
 use log::{debug, info, warn};

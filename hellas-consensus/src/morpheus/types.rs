@@ -417,8 +417,13 @@ impl Block {
         
         // Convert to bytes
         let hash_value = hasher.finish();
+        let hash_bytes = hash_value.to_be_bytes();
         let mut bytes = [0u8; 32];
-        bytes.copy_from_slice(&hash_value.to_be_bytes());
+        
+        // Copy the available bytes and zero-pad the rest
+        for i in 0..hash_bytes.len() {
+            bytes[i] = hash_bytes[i];
+        }
         
         Hash(bytes)
     }

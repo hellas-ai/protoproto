@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 use muchin::automaton::ModelState;
-use muchin_model_state_derive::ModelState;
 
 use super::types::*;
 use super::blocks::BlockState;
@@ -13,7 +12,7 @@ use super::view_change::ViewState;
 /// This unified state structure integrates all protocol state components
 /// in a single cohesive interface. It provides access to block, vote, and
 /// view change operations through dedicated sub-states.
-#[derive(ModelState, Debug)]
+#[derive(Debug)]
 pub struct MorpheusState {
     //
     // Configuration

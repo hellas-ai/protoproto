@@ -3,8 +3,9 @@
 mod actions;
 mod models;
 mod state;
+mod test_state;
 mod types;
-mod utils;
+pub mod utils;
 
 // Core protocol modules
 pub mod blocks;
@@ -16,9 +17,10 @@ pub mod voting;
 pub use actions::*;
 pub use models::*;
 pub use state::*;
+pub use test_state::*;
 pub use types::*;
 
-use muchin::automaton::{RegisterModel, RunnerBuilder};
+use muchin::automaton::RunnerBuilder;
 use std::time::Duration;
 
 /// Configuration for the Morpheus protocol
@@ -41,7 +43,7 @@ pub struct MorpheusConfig {
 /// the current state.
 pub struct Morpheus {
     /// The runner
-    runner: muchin::automaton::Runner<MorpheusState>,
+    runner: muchin::automaton::Runner<TestMorpheusState>,
 }
 
 impl Morpheus {
@@ -54,7 +56,7 @@ impl Morpheus {
         );
 
         // Create the state
-        let state = MorpheusState::new(
+        let state = TestMorpheusState::new(
             config.process_id,
             config.num_processes,
             config.f,
@@ -62,7 +64,7 @@ impl Morpheus {
         );
 
         // Initialize the runner
-        let runner = RunnerBuilder::<MorpheusState>::new()
+        let runner = RunnerBuilder::<TestMorpheusState>::new()
             .register::<MorpheusModel>()
             .instance(state, || MorpheusAction::Tick.into())
             .build();
