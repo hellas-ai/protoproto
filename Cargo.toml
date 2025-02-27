@@ -1,3 +1,3 @@
 [workspace]
-members = ["muchin", "muchin/model_state_derive", "hellas-protocol", "hades", "native-node", "web-node"]
+members = ["muchin", "muchin/model_state_derive", "hellas-protocol", "hades", "native-node", "web-node", "hellas-consensus"]
 resolver = "2"

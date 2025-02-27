@@ -13,7 +13,7 @@ use web_sys::{Document, HtmlElement};
 pub async fn run(libp2p_endpoint: String) -> Result<(), JsError> {
     tracing_wasm::set_as_global_default();
 
-    let ping_duration = Duration::from_secs(30);
+    let ping_duration = Duration::from_secs(3000);
 
     let body = Body::from_current_window()?;
     body.append_p(&format!(

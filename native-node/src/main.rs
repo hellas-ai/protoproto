@@ -28,8 +28,7 @@ use tracing_subscriber::EnvFilter;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env()?)
-        //.with_env_filter("browser_webrtc_example=debug,libp2p_webrtc=info,libp2p_ping=debug")
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::from("info")))
         .try_init();
 
     let whats_up: TopLevel = argh::from_env();
@@ -110,6 +109,10 @@ struct StaticFiles;
 
 /// Serve the Multiaddr we are listening on and the host files.
 pub(crate) async fn serve(libp2p_transport: Multiaddr, port: u16) {
+    for path in StaticFiles::iter() {
+        println!("available files: {}", path)
+    }
+
     let Some(Protocol::Ip4(listen_addr)) = libp2p_transport.iter().next() else {
         panic!("Expected 1st protocol to be IP4")
     };
@@ -164,9 +167,6 @@ async fn get_index(
 async fn get_static_file(Path(path): Path<String>) -> Result<impl IntoResponse, StatusCode> {
     tracing::debug!(file_path=%path, "Serving static file");
 
-    for path in StaticFiles::iter() {
-        println!("available: {}", path)
-    }
     let content = StaticFiles::get(&path).ok_or(StatusCode::NOT_FOUND)?.data;
     let content_type = mime_guess::from_path(path)
         .first_or_octet_stream()

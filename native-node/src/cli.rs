@@ -14,7 +14,7 @@ pub enum Subcommands {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// Run a fresh daemon in the background
+/// Run a fresh daemon in the foreground
 #[argh(subcommand, name = "run-daemon")]
 pub struct RunDaemon {
     #[argh(option)]

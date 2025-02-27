@@ -5,4 +5,4 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-redux = { git = "https://github.com/openmina/redux-rs", branch = "master" }
+muchin = { path = "../muchin" }
