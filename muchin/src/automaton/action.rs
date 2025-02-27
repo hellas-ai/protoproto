@@ -310,11 +310,11 @@ pub static CALLBACKS: [(&str, fn(&str, Box<dyn Any>) -> AnyAction)];
 #[macro_export]
 macro_rules! _callback {
     ($gensym:ident, $arg:tt, $arg_type:ty, $body:expr) => {{
-        use crate::automaton::Redispatch;
-        use crate::automaton::{AnyAction, CALLBACKS};
-        use linkme::distributed_slice;
+        use $crate::automaton::Redispatch;
+        use $crate::automaton::{AnyAction, CALLBACKS};
+        use $crate::linkme::distributed_slice;
 
-        paste::paste! {
+        $crate::paste::paste! {
             #[allow(unused)] // $arg is marked as unused, but it's used in `$body`
             fn convert_impl($arg: $arg_type) -> AnyAction {
                 ($body).into()
@@ -344,9 +344,9 @@ macro_rules! _callback {
 #[macro_export]
 macro_rules! callback {
     (|($($var:ident : $typ:ty),+)| $body:expr) => {
-        gensym::gensym! { crate::_callback!(($($var),+), ($($typ),+), $body) }
+        $crate::gensym::gensym! { $crate::_callback!(($($var),+), ($($typ),+), $body) }
     };
     (|$var:ident : $typ:ty| $body:expr) => {
-        gensym::gensym! { crate::_callback!($var, $typ, $body) }
+        $crate::gensym::gensym! { $crate::_callback!($var, $typ, $body) }
     };
 }

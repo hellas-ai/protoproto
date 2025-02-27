@@ -79,4 +79,32 @@ impl Morpheus {
     pub fn step(&mut self) -> bool {
         self.runner.step()
     }
+
+    pub fn get_state_mut(&mut self) -> &mut MorpheusState {
+        self.runner.state.substate_mut()
+    }
+
+    pub fn get_state(&self) -> &MorpheusState {
+        self.runner.state.substate()
+    }
+
+    /// Get the ordered log of transactions
+    pub fn get_log(&self) -> Vec<Transaction> {
+        let state = self.get_state();
+        ordering::extract_log(state)
+    }
+    
+    /// Add a transaction to be processed
+    pub fn add_transaction(&mut self, transaction: Transaction) {
+        // Add transaction to pending transactions
+        self.get_state_mut().pending_transactions.push(transaction);
+        
+        // If we have enough transactions, create a transaction block
+        if self.get_state().pending_transactions.len() >= 10 { // Arbitrary threshold
+            let action = MorpheusAction::Block(
+                BlockAction::CreateTransactionBlock
+            );
+            self.runner.dispatch(action, 0);
+        }
+    }
 }

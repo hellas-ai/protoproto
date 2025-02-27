@@ -76,7 +76,7 @@ impl PureModel for MorpheusModel {
                    morph_state.phase == ThroughputPhase::High {
                     // Only create leader blocks in high throughput phase
                     if !morph_state.block_state.is_single_tip(
-                        morph_state.block_state.tips.iter().next().unwrap_or(&Hash(vec![]))) {
+                        morph_state.block_state.tips.iter().next().unwrap_or(&Hash([0u8; 32]))) {
                         // Only if we don't have a single tip
                         dispatcher.dispatch(MorpheusAction::Block(
                             BlockAction::CreateLeaderBlock
@@ -112,7 +112,7 @@ impl EffectfulModel for NetworkModel {
             NetworkAction::SendVoteToProcess { vote, recipient, on_success, on_error } => {
                 // In a real implementation, this would send the vote to the recipient
                 debug!("Sending vote type {:?} to process {}", vote.vote_type, recipient);
-                dispatcher.dispatch_back(&on_success, ());
+                dispatcher.dispatch_back(&on_success, vote);
             },
             NetworkAction::BroadcastVote { vote, on_success, on_error } => {
                 // In a real implementation, this would broadcast the vote to all processes
@@ -142,7 +142,7 @@ impl EffectfulModel for NetworkModel {
             NetworkAction::SendQCToLeader { qc, recipient, on_success, on_error } => {
                 // In a real implementation, this would send the QC to the leader
                 debug!("Sending QC for block {:?} to leader {}", qc.block_hash, recipient);
-                dispatcher.dispatch_back(&on_success, ());
+                dispatcher.dispatch_back(&on_success, qc);
             },
         }
     }

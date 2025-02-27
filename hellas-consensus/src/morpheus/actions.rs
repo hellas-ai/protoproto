@@ -145,29 +145,29 @@ pub enum NetworkAction {
     BroadcastBlock {
         block: Block,
         on_success: Redispatch<(Block, Hash)>,
-        on_error: Redispatch<String>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Send a 0-vote to the block creator
     SendVoteToProcess {
         vote: Vote,
         recipient: ProcessId,
-        on_success: Redispatch<()>,
-        on_error: Redispatch<String>,
+        on_success: Redispatch<Vote>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Broadcast a vote to all processes (for 1-votes and 2-votes)
     BroadcastVote {
         vote: Vote,
         on_success: Redispatch<Vote>,
-        on_error: Redispatch<String>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Broadcast a QC to all processes
     BroadcastQC {
         qc: QC,
         on_success: Redispatch<QC>,
-        on_error: Redispatch<String>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Send a view message to the leader
@@ -175,29 +175,29 @@ pub enum NetworkAction {
         message: ViewMessage,
         recipient: ProcessId,
         on_success: Redispatch<ViewMessage>,
-        on_error: Redispatch<String>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Broadcast an end-view message to all processes
     BroadcastEndView {
         message: EndViewMessage,
         on_success: Redispatch<EndViewMessage>,
-        on_error: Redispatch<String>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Broadcast a view certificate to all processes
     BroadcastViewCertificate {
         certificate: ViewCertificate,
         on_success: Redispatch<ViewCertificate>,
-        on_error: Redispatch<String>,
+        on_error: Redispatch<(View, String)>,
     },
     
     /// Send QC to leader after not being finalized for 6Δ
     SendQCToLeader {
         qc: QC,
         recipient: ProcessId,
-        on_success: Redispatch<()>,
-        on_error: Redispatch<String>,
+        on_success: Redispatch<QC>,
+        on_error: Redispatch<(View, String)>,
     },
 }
 

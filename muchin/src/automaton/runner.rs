@@ -14,9 +14,9 @@ use type_uuid::TypeUuid;
 /// running multiple nodes interacting with each other, all this inside the same
 /// state-machine.
 pub struct Runner<Substate: ModelState> {
-    models: BTreeMap<type_uuid::Bytes, AnyModel<Substate>>,
-    state: State<Substate>,
-    dispatchers: Vec<Dispatcher>,
+    pub models: BTreeMap<type_uuid::Bytes, AnyModel<Substate>>,
+    pub state: State<Substate>,
+    pub dispatchers: Vec<Dispatcher>,
 }
 
 /// Models should implement their own `register` function to register themselves
@@ -121,6 +121,14 @@ impl<Substate: ModelState> Runner<Substate> {
             self.process_action(action, instance)
         }
         false
+    }
+
+    pub fn dispatch<A: super::Action>(&mut self, action: A, instance: usize) 
+    where
+        A: Sized + 'static,
+        super::IfPure<{ A::KIND as u8 }>: super::True, {
+        let dispatcher = &mut self.dispatchers[instance];
+        dispatcher.dispatch(action);
     }
 
     fn process_action(&mut self, action: AnyAction, instance: usize) {

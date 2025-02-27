@@ -6,7 +6,7 @@ use muchin::callback;
 
 use super::types::*;
 use super::state::MorpheusState;
-use super::actions::{ViewChangeAction, NetworkAction, MorpheusAction};
+use super::actions::{ViewChangeAction, NetworkAction, MorpheusAction, VotingAction};
 
 /// View State - Extracted from MorpheusState for view-specific operations
 #[derive(Debug)]
@@ -216,7 +216,7 @@ pub fn form_view_certificate(
         certificate: certificate.clone(),
         on_success: callback!(|certificate: ViewCertificate| 
             MorpheusAction::ViewChange(ViewChangeAction::ProcessViewCertificate { certificate })),
-        on_error: callback!(|error: String| 
+        on_error: callback!(|(view: View, error: String)| 
             MorpheusAction::ViewChange(ViewChangeAction::SendEndView { view })),
     });
 }
@@ -246,7 +246,7 @@ pub fn send_end_view(
         message: message.clone(),
         on_success: callback!(|message: EndViewMessage| 
             MorpheusAction::ViewChange(ViewChangeAction::ProcessEndView { message })),
-        on_error: callback!(|error: String| 
+        on_error: callback!(|(view: View, error: String)| 
             MorpheusAction::ViewChange(ViewChangeAction::SendEndView { view })),
     });
 }
@@ -293,8 +293,8 @@ pub fn update_view(
             certificate: certificate.clone(),
             on_success: callback!(|certificate: ViewCertificate| 
                 MorpheusAction::ViewChange(ViewChangeAction::ProcessViewCertificate { certificate })),
-            on_error: callback!(|error: String| 
-                MorpheusAction::ViewChange(ViewChangeAction::SendEndView { view: state.current_view })),
+            on_error: callback!(|(view: View, error: String)| 
+                MorpheusAction::ViewChange(ViewChangeAction::SendEndView { view })),
         });
     }
     
@@ -308,11 +308,11 @@ pub fn update_view(
             dispatcher.dispatch_effect(NetworkAction::SendQCToLeader {
                 qc: qc.clone(),
                 recipient: leader,
-                on_success: callback!(|()| MorpheusAction::Voting(
-                    crate::voting::VotingAction::ProcessQC { qc: qc.clone() }
+                on_success: callback!(|qc: QC| MorpheusAction::Voting(
+                    VotingAction::ProcessQC { qc }
                 )),
-                on_error: callback!(|error: String| MorpheusAction::ViewChange(
-                    ViewChangeAction::SendEndView { view: new_view }
+                on_error: callback!(|(view: View, error: String)| MorpheusAction::ViewChange(
+                    ViewChangeAction::SendEndView { view }
                 )),
             });
         }
@@ -322,13 +322,13 @@ pub fn update_view(
     let view_message = ViewMessage {
         view: new_view,
         qc: state.vote_state.greatest_1qc.clone().unwrap_or_else(|| QC {
-            vote_type: VoteType::Vote1,
-            block_type: BlockType::Genesis,
-            view: View(0),
+            vote_type: VoteType::Vote0,
+            block_type: BlockType::Leader,
+            view: new_view,
             height: Height(0),
-            author: ProcessId(0),
+            author: state.process_id,
             slot: Slot(0),
-            block_hash: Hash(vec![]),
+            block_hash: Hash([0u8; 32]),
             signatures: ThresholdSignature(vec![]),
         }),
         signer: state.process_id,
@@ -340,8 +340,8 @@ pub fn update_view(
         recipient: leader,
         on_success: callback!(|message: ViewMessage| 
             MorpheusAction::ViewChange(ViewChangeAction::ProcessViewMessage { message })),
-        on_error: callback!(|error: String| 
-            MorpheusAction::ViewChange(ViewChangeAction::SendEndView { view: new_view })),
+        on_error: callback!(|(view: View, error: String)| 
+            MorpheusAction::ViewChange(ViewChangeAction::SendEndView { view })),
     });
     
     true
@@ -353,57 +353,94 @@ pub fn check_timeouts(
     current_time: u64,
     dispatcher: &mut Dispatcher,
 ) {
-    if let Some(timeouts) = &mut state.view_state.view_timeouts {
-        if timeouts.view != state.current_view {
-            // Timeouts don't match current view, reset them
-            state.view_state.view_timeouts = Some(ViewTimeouts {
-                view: state.current_view,
-                view_entry_time: Instant::now(),
-                complaint_timeout: state.delta * 6,
-                end_view_timeout: state.delta * 12,
-                complained: false,
-                sent_end_view: false,
-            });
-            return;
-        }
-        
-        let elapsed = timeouts.view_entry_time.elapsed();
-        
-        // Check for 6Δ timeout (complaint timeout)
-        if !timeouts.complained && elapsed >= timeouts.complaint_timeout {
-            // Send pending QCs to leader
-            timeouts.complained = true;
+    // First, check if we need to reset timeouts
+    let reset_timeouts = if let Some(timeouts) = &state.view_state.view_timeouts {
+        timeouts.view != state.current_view
+    } else {
+        true
+    };
+
+    if reset_timeouts {
+        // Reset timeouts
+        state.view_state.view_timeouts = Some(ViewTimeouts {
+            view: state.current_view,
+            view_entry_time: Instant::now(),
+            complaint_timeout: state.delta * 6,
+            end_view_timeout: state.delta * 12,
+            complained: false,
+            sent_end_view: false,
+        });
+        return;
+    }
+
+    // Extract the information we need from timeouts to avoid borrowing issues
+    let (view, elapsed, already_complained, already_sent_end_view, complaint_timeout, end_view_timeout) = 
+        if let Some(timeouts) = &mut state.view_state.view_timeouts {
+            let elapsed = timeouts.view_entry_time.elapsed();
+            let view = timeouts.view;
+            let already_complained = timeouts.complained;
+            let already_sent_end_view = timeouts.sent_end_view;
+            let complaint_timeout = timeouts.complaint_timeout;
+            let end_view_timeout = timeouts.end_view_timeout;
             
-            // Per pseudocode line 56, send QCs that haven't been finalized
-            for ((vote_type, block_hash), qc) in &state.vote_state.qcs {
-                if !state.vote_state.is_finalized(block_hash) &&
-                   !state.view_state.was_qc_sent_to_leader(block_hash) {
-                    
-                    // Send QC to leader
-                    let leader = MorpheusState::get_leader(state.current_view, state.num_processes);
-                    
-                    dispatcher.dispatch_effect(NetworkAction::SendQCToLeader {
-                        qc: qc.clone(),
-                        recipient: leader,
-                        on_success: callback!(|()| MorpheusAction::Tick),
-                        on_error: callback!(|error: String| MorpheusAction::ViewChange(
-                            ViewChangeAction::SendEndView { view: state.current_view }
-                        )),
-                    });
-                    
-                    // Mark as sent to leader
-                    state.view_state.mark_qc_sent_to_leader(block_hash.clone());
-                }
+            // Update complained flag if needed
+            if !already_complained && elapsed >= complaint_timeout {
+                timeouts.complained = true;
+            }
+            
+            // Update sent_end_view flag if needed
+            if !already_sent_end_view && elapsed >= end_view_timeout {
+                timeouts.sent_end_view = true;
+            }
+            
+            (view, elapsed, already_complained, already_sent_end_view, complaint_timeout, end_view_timeout)
+        } else {
+            return;
+        };
+
+    // Check for 6Δ timeout (complaint timeout)
+    if !already_complained && elapsed >= complaint_timeout {
+        // Collect QCs that need to be sent to leader
+        let leader = MorpheusState::get_leader(state.current_view, state.num_processes);
+        
+        // First, collect the block hashes that haven't been sent to leader
+        let mut qcs_to_send = Vec::new();
+        
+        // Create a set of block hashes that have been sent to leader
+        let sent_to_leader: BTreeSet<Hash> = state.view_state.qcs_sent_to_leader.clone();
+        
+        // Now collect QCs that need to be sent
+        for ((vote_type, block_hash), qc) in &state.vote_state.qcs {
+            if !state.vote_state.is_finalized(block_hash) && 
+               !sent_to_leader.contains(block_hash) {
+                qcs_to_send.push((block_hash.clone(), qc.clone()));
             }
         }
         
-        // Check for 12Δ timeout (end-view timeout)
-        if !timeouts.sent_end_view && elapsed >= timeouts.end_view_timeout {
-            // Send end-view message (line 58-59 in pseudocode)
-            dispatcher.dispatch(MorpheusAction::ViewChange(
-                ViewChangeAction::SendEndView { view: state.current_view }
-            ));
+        // Send collected QCs to leader and mark them as sent
+        for (block_hash, qc) in qcs_to_send {
+            dispatcher.dispatch_effect(NetworkAction::SendQCToLeader {
+                qc: qc.clone(),
+                recipient: leader,
+                on_success: callback!(|qc: QC| MorpheusAction::Voting(
+                    VotingAction::ProcessQC { qc }
+                )),
+                on_error: callback!(|(view: View, error: String)| MorpheusAction::ViewChange(
+                    ViewChangeAction::SendEndView { view }
+                )),
+            });
+            
+            // Mark as sent to leader
+            state.view_state.mark_qc_sent_to_leader(block_hash);
         }
+    }
+    
+    // Check for 12Δ timeout (end-view timeout)
+    if !already_sent_end_view && elapsed >= end_view_timeout {
+        // Send end-view message (line 58-59 in pseudocode)
+        dispatcher.dispatch(MorpheusAction::ViewChange(
+            ViewChangeAction::SendEndView { view: state.current_view }
+        ));
     }
 }
 

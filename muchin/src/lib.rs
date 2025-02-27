@@ -4,5 +4,9 @@
 pub mod automaton;
 pub mod models;
 
+pub extern crate gensym;
+pub extern crate linkme;
+pub extern crate paste;
+
 #[cfg(test)]
 pub mod tests;

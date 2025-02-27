@@ -5,7 +5,7 @@ use muchin::callback;
 
 use super::types::*;
 use super::state::MorpheusState;
-use super::actions::{VotingAction, NetworkAction, MorpheusAction};
+use super::actions::{VotingAction, NetworkAction, MorpheusAction, ViewChangeAction};
 
 /// Vote State - Extracted from MorpheusState for vote-specific operations
 #[derive(Debug)]
@@ -207,11 +207,14 @@ pub fn process_vote(
     let quorum_size = state.num_processes - state.f;
     let have_quorum = state.vote_state.add_vote(vote.clone(), quorum_size);
     
+    // Clone the block_hash once at the beginning
+    let block_hash = vote.block_hash.clone();
+    
     // Form a QC if we have enough votes
     if have_quorum {
         dispatcher.dispatch(MorpheusAction::Voting(VotingAction::FormQC {
             vote_type: vote.vote_type,
-            block_hash: vote.block_hash,
+            block_hash: block_hash.clone(),
         }));
     }
     
@@ -220,10 +223,10 @@ pub fn process_vote(
        vote.block_type == BlockType::Transaction &&
        have_quorum {
         
-        let qc_key = (vote.vote_type, vote.block_hash.clone());
-        if let Some(qc) = state.vote_state.qcs.get(&qc_key) {
+        let qc_key = (vote.vote_type, block_hash.clone());
+        if let Some(_qc) = state.vote_state.qcs.get(&qc_key) {
             // Check if this QC's block is a single tip
-            let is_single_tip = state.block_state.is_single_tip(&vote.block_hash);
+            let is_single_tip = state.block_state.is_single_tip(&block_hash);
             
             if is_single_tip &&
                !state.vote_state.has_voted(VoteType::Vote2, BlockType::Transaction, vote.slot, vote.author) {
@@ -242,7 +245,7 @@ pub fn process_vote(
                         height: vote.height,
                         author: vote.author,
                         slot: vote.slot,
-                        block_hash: vote.block_hash,
+                        block_hash: block_hash,
                     }));
                     
                     // Set phase to Low (1)
@@ -268,7 +271,7 @@ pub fn process_vote(
                 height: vote.height,
                 author: vote.author,
                 slot: vote.slot,
-                block_hash: vote.block_hash,
+                block_hash: vote.block_hash.clone(),
             }));
         }
     }
@@ -300,8 +303,8 @@ pub fn process_qc(
         dispatcher.dispatch_effect(NetworkAction::BroadcastQC {
             qc: qc.clone(),
             on_success: callback!(|qc: QC| MorpheusAction::Voting(VotingAction::ProcessQC { qc })),
-            on_error: callback!(|error: String| MorpheusAction::ViewChange(
-                crate::view_change::ViewChangeAction::SendEndView { view: state.current_view }
+            on_error: callback!(|(view: View, error: String)| MorpheusAction::ViewChange(
+                ViewChangeAction::SendEndView { view }
             )),
         });
     }
@@ -314,38 +317,48 @@ pub fn form_qc(
     block_hash: Hash,
     dispatcher: &mut Dispatcher,
 ) {
-    // Get the votes
+    // Get the votes and extract all necessary information first
     let key = (vote_type, block_hash.clone());
-    if let Some(votes) = state.vote_state.votes.get(&key) {
-        if votes.is_empty() {
-            return;
+    
+    // Check if we have votes and extract all needed information
+    let qc_option = {
+        let votes = state.vote_state.votes.get(&key);
+        if votes.is_none() || votes.as_ref().unwrap().is_empty() {
+            None
+        } else {
+            let votes = votes.unwrap();
+            let first_vote = &votes[0];
+            
+            // Create the QC
+            Some(QC {
+                vote_type,
+                block_type: first_vote.block_type,
+                view: first_vote.view,
+                height: first_vote.height,
+                author: first_vote.author,
+                slot: first_vote.slot,
+                block_hash: block_hash.clone(),
+                signatures: ThresholdSignature(vec![]), // placeholder
+            })
         }
-        
-        // Use first vote to get block info
-        let first_vote = &votes[0];
-        
-        // Create the QC
-        let qc = QC {
-            vote_type,
-            block_type: first_vote.block_type,
-            view: first_vote.view,
-            height: first_vote.height,
-            author: first_vote.author,
-            slot: first_vote.slot,
-            block_hash: block_hash.clone(),
-            signatures: ThresholdSignature(vec![]), // placeholder
-        };
+    };
+    
+    // If we have a QC, add it to state and possibly broadcast
+    if let Some(qc) = qc_option {
+        // Store author and process_id before adding QC
+        let author = qc.author;
+        let process_id = state.process_id;
         
         // Add QC to state
         state.vote_state.add_qc(qc.clone());
         
         // For 0-QCs, broadcast to all if this is our block
-        if vote_type == VoteType::Vote0 && first_vote.author == state.process_id {
+        if vote_type == VoteType::Vote0 && author == process_id {
             dispatcher.dispatch_effect(NetworkAction::BroadcastQC {
                 qc: qc.clone(),
                 on_success: callback!(|qc: QC| MorpheusAction::Voting(VotingAction::ProcessQC { qc })),
-                on_error: callback!(|error: String| MorpheusAction::ViewChange(
-                    crate::view_change::ViewChangeAction::SendEndView { view: first_vote.view }
+                on_error: callback!(|(view: View, error: String)| MorpheusAction::ViewChange(
+                    ViewChangeAction::SendEndView { view }
                 )),
             });
         }
@@ -487,9 +500,9 @@ pub fn send_vote(
         dispatcher.dispatch_effect(NetworkAction::SendVoteToProcess {
             vote: vote.clone(),
             recipient: author,
-            on_success: callback!(|()| MorpheusAction::Voting(VotingAction::ProcessVote { vote: vote.clone() })),
-            on_error: callback!(|error: String| MorpheusAction::ViewChange(
-                crate::view_change::ViewChangeAction::SendEndView { view }
+            on_success: callback!(|vote: Vote| MorpheusAction::Voting(VotingAction::ProcessVote { vote })),
+            on_error: callback!(|(view: View, error: String)| MorpheusAction::ViewChange(
+                ViewChangeAction::SendEndView { view }
             )),
         });
     } else {
@@ -497,8 +510,8 @@ pub fn send_vote(
         dispatcher.dispatch_effect(NetworkAction::BroadcastVote {
             vote: vote.clone(),
             on_success: callback!(|vote: Vote| MorpheusAction::Voting(VotingAction::ProcessVote { vote })),
-            on_error: callback!(|error: String| MorpheusAction::ViewChange(
-                crate::view_change::ViewChangeAction::SendEndView { view }
+            on_error: callback!(|(view: View, error: String)| MorpheusAction::ViewChange(
+                ViewChangeAction::SendEndView { view }
             )),
         });
     }

@@ -88,27 +88,35 @@ impl Default for ThroughputPhase {
     }
 }
 
-/// Cryptographic hash placeholder
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug)]
-pub struct Hash(pub Vec<u8>);
+/// Hash of a block
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Copy, Serialize, Deserialize)]
+pub struct Hash(pub [u8; 32]);
 
 impl Hash {
     /// Create a new hash for testing
     #[cfg(test)]
     pub fn new_for_testing(s: &str) -> Self {
-        Self(s.as_bytes().to_vec())
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(s.as_bytes());
+        Self(hash)
     }
 }
 
 impl StdHash for Hash {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
+        state.write(&self.0);
     }
 }
 
 impl Default for Hash {
     fn default() -> Self {
-        Self(Vec::new())
+        Self([0u8; 32])
+    }
+}
+
+impl fmt::Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Hash({:?})", self.0)
     }
 }
 
@@ -339,6 +347,7 @@ impl Timer {
 }
 
 /// View timeouts tracking structure
+#[derive(Clone, Debug)]
 pub struct ViewTimeouts {
     /// The view these timeouts are for
     pub view: View,
@@ -372,8 +381,8 @@ impl Block {
                 height: Height(0),
                 author: ProcessId(0),
                 slot: Slot(0),
-                block_hash: Hash(vec![]),
-                signatures: ThresholdSignature(vec![]),
+                block_hash: Hash([0u8; 32]),
+                signatures: ThresholdSignature(Vec::new()),
             },
             justification: None,
             signature: None,
@@ -408,7 +417,8 @@ impl Block {
         
         // Convert to bytes
         let hash_value = hasher.finish();
-        let bytes = hash_value.to_be_bytes().to_vec();
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&hash_value.to_be_bytes());
         
         Hash(bytes)
     }

@@ -531,14 +531,14 @@ pub fn create_transaction_block(state: &mut MorpheusState) -> Block {
         height: Height(0), // Will set later
         transactions: std::mem::take(&mut state.pending_transactions),
         prev: Vec::new(),
-        qc: state.greatest_1qc.clone().unwrap_or_else(|| QC {
+        qc: state.vote_state.greatest_1qc.clone().unwrap_or_else(|| QC {
             vote_type: VoteType::Vote1,
             block_type: BlockType::Genesis,
             view: View(0),
             height: Height(0),
             author: ProcessId(0),
             slot: Slot(0),
-            block_hash: Hash(vec![]), // genesis hash
+            block_hash: Hash([0u8; 32]), // genesis hash
             signatures: ThresholdSignature(vec![]), // placeholder
         }),
         justification: None,
@@ -553,7 +553,7 @@ pub fn create_transaction_block(state: &mut MorpheusState) -> Block {
     
     if s > 0 {
         // Find QC for previous transaction block
-        for ((block_type, author, slot), qc) in &state.latest_qcs {
+        for ((block_type, author, slot), qc) in &state.vote_state.latest_qcs {
             if *block_type == BlockType::Transaction && 
                *author == state.process_id && 
                slot.0 == s - 1 {
@@ -611,7 +611,7 @@ pub fn create_leader_block(state: &mut MorpheusState) -> Option<Block> {
             height: Height(0),
             author: ProcessId(0),
             slot: Slot(0),
-            block_hash: Hash(vec![]),
+            block_hash: Hash([0u8; 32]),
             signatures: ThresholdSignature(vec![]),
         },
         justification: None,
@@ -658,7 +658,7 @@ pub fn create_leader_block(state: &mut MorpheusState) -> Option<Block> {
     let v = state.current_view;
     
     if s > 0 {
-        for ((block_type, author, slot), qc) in &state.latest_qcs {
+        for ((block_type, author, slot), qc) in &state.vote_state.latest_qcs {
             if *block_type == BlockType::Leader && 
                *author == state.process_id && 
                slot.0 == s - 1 {
@@ -705,7 +705,7 @@ pub fn create_leader_block(state: &mut MorpheusState) -> Option<Block> {
     if !has_produced_leader_block {
         // First leader block of the view
         // Set justification to view messages
-        let view_messages = state.view_messages
+        let view_messages = state.view_state.view_messages
             .get(&state.current_view)
             .cloned()
             .unwrap_or_default();
@@ -723,14 +723,14 @@ pub fn create_leader_block(state: &mut MorpheusState) -> Option<Block> {
             block.justification = Some(justification);
             
             // Set 1-QC to be greater than or equal to all 1-QCs in view messages
-            let mut max_qc = state.greatest_1qc.clone().unwrap_or_else(|| QC {
+            let mut max_qc = state.vote_state.greatest_1qc.clone().unwrap_or_else(|| QC {
                 vote_type: VoteType::Vote1,
                 block_type: BlockType::Genesis,
                 view: View(0),
                 height: Height(0),
                 author: ProcessId(0),
                 slot: Slot(0),
-                block_hash: Hash(vec![]),
+                block_hash: Hash([0u8; 32]),
                 signatures: ThresholdSignature(vec![]),
             });
             
@@ -749,7 +749,7 @@ pub fn create_leader_block(state: &mut MorpheusState) -> Option<Block> {
     } else {
         // Subsequent leader block in the view
         // Set 1-QC to QC for previous leader block
-        for ((block_type, author, slot), qc) in &state.latest_qcs {
+        for ((block_type, author, slot), qc) in &state.vote_state.latest_qcs {
             if *block_type == BlockType::Leader && 
                *author == state.process_id && 
                slot.0 == s - 1 && 
@@ -784,9 +784,9 @@ pub fn handle_create_transaction_block(
         block: block.clone(),
         on_success: callback!(|(block: Block, hash: Hash)| 
             MorpheusAction::Block(BlockAction::BlockCreated { block, hash })),
-        on_error: callback!(|error: String| 
+        on_error: callback!(|(view: View, error: String)| 
             MorpheusAction::ViewChange(ViewChangeAction::SendEndView { 
-                view: state.current_view 
+                view
             })),
     });
     
@@ -806,9 +806,9 @@ pub fn handle_create_leader_block(
             block: block.clone(),
             on_success: callback!(|(block: Block, hash: Hash)| 
                 MorpheusAction::Block(BlockAction::BlockCreated { block, hash })),
-            on_error: callback!(|error: String| 
+            on_error: callback!(|(view: View, error: String)| 
                 MorpheusAction::ViewChange(ViewChangeAction::SendEndView {
-                    view: state.current_view 
+                    view
                 })),
         });
         

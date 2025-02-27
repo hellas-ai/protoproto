@@ -73,7 +73,7 @@ pub type Objects<T> = BTreeMap<Uid, T>;
 pub struct State<Substates: ModelState> {
     pub uid_source: Uid,
     pub substates: Vec<Substates>,
-    current_instance: usize,
+    pub(crate) current_instance: usize,
 }
 
 /// The `ModelState` trait provides an interface for Models to access their own

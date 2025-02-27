@@ -211,5 +211,34 @@ pub fn compute_total_ordering(state: &MorpheusState) -> OrderedTransactions {
 ///
 /// This implements the F function from the paper for extractable SMR
 pub fn extract_log(state: &MorpheusState) -> Vec<Transaction> {
+    // This function is now just a wrapper around the OrderingState's get_ordered_transactions
+    // However, we can't modify the state here, so we'll just compute the ordering directly
     compute_total_ordering(state).transactions
+}
+
+/// Find the block with the maximal 2-QC
+pub fn find_max_finalized_block(state: &MorpheusState) -> Option<Hash> {
+    let mut max_qc = None;
+    let mut max_block_hash = None;
+    
+    for hash in &state.vote_state.finalized_blocks {
+        // Skip blocks that aren't actually finalized according to local state
+        if !state.vote_state.is_finalized(hash) {
+            continue;
+        }
+        
+        if let Some(qc) = state.vote_state.get_qc(VoteType::Vote2, hash) {
+            if let Some(current_max) = &max_qc {
+                if qc.is_greater_than(current_max) {
+                    max_qc = Some(qc.clone());
+                    max_block_hash = Some(hash.clone());
+                }
+            } else {
+                max_qc = Some(qc.clone());
+                max_block_hash = Some(hash.clone());
+            }
+        }
+    }
+    
+    max_block_hash
 }
