@@ -1,112 +1,48 @@
-// lib.rs - Root module that ties everything together
-
-mod actions;
-mod models;
-mod state;
-mod test_state;
+// lib.rs - Main library file
 mod types;
-pub mod utils;
+mod state;
+mod protocol;
 
-// Core protocol modules
-pub mod blocks;
-pub mod ordering;
-pub mod view_change;
-pub mod voting;
-
-// Re-exports for public API
-pub use actions::*;
-pub use models::*;
-pub use state::*;
-pub use test_state::*;
 pub use types::*;
+pub use state::*;
+pub use protocol::*;
 
-use muchin::automaton::RunnerBuilder;
-use std::time::Duration;
-
-/// Configuration for the Morpheus protocol
-#[derive(Clone, Debug)]
-pub struct MorpheusConfig {
-    /// Process ID for this node
-    pub process_id: ProcessId,
-    /// Total number of processes
-    pub num_processes: usize,
-    /// Maximum number of Byzantine faults (usually (n-1)/3)
-    pub f: usize,
-    /// Bound on message delays (Δ in the paper)
-    pub delta: Duration,
-}
-
-/// Morpheus protocol instance
-///
-/// This is the main entry point for using the Morpheus protocol.
-/// It provides a simple interface for adding transactions and querying
-/// the current state.
+// Morpheus protocol driver
 pub struct Morpheus {
-    /// The runner
-    runner: muchin::automaton::Runner<TestMorpheusState>,
+    state: MorpheusState,
 }
 
 impl Morpheus {
-    /// Create a new instance of the Morpheus protocol
-    pub fn new(config: MorpheusConfig) -> Self {
-        // Validate configuration
-        assert!(
-            config.f * 3 < config.num_processes,
-            "f must be less than n/3 for Byzantine fault tolerance"
-        );
-
-        // Create the state
-        let state = TestMorpheusState::new(
-            config.process_id,
-            config.num_processes,
-            config.f,
-            config.delta,
-        );
-
-        // Initialize the runner
-        let runner = RunnerBuilder::<TestMorpheusState>::new()
-            .register::<MorpheusModel>()
-            .instance(state, || MorpheusAction::Tick.into())
-            .build();
-
-        Self { runner }
-    }
-
-    /// Run the protocol continuously
-    pub fn run(&mut self) {
-        self.runner.run();
-    }
-
-    /// Take a single step in the protocol
-    pub fn step(&mut self) -> bool {
-        self.runner.step()
-    }
-
-    pub fn get_state_mut(&mut self) -> &mut MorpheusState {
-        self.runner.state.substate_mut()
-    }
-
-    pub fn get_state(&self) -> &MorpheusState {
-        self.runner.state.substate()
-    }
-
-    /// Get the ordered log of transactions
-    pub fn get_log(&self) -> Vec<Transaction> {
-        let state = self.get_state();
-        ordering::extract_log(state)
+    // Create a new protocol instance
+    pub fn new(process_id: ProcessId, num_processes: usize, f: usize, delta: Duration) -> Self {
+        assert!(f * 3 < num_processes, "f must be less than n/3 for BFT");
+        Self { state: MorpheusState::new(process_id, num_processes, f, delta) }
     }
     
-    /// Add a transaction to be processed
-    pub fn add_transaction(&mut self, transaction: Transaction) {
-        // Add transaction to pending transactions
-        self.get_state_mut().pending_transactions.push(transaction);
-        
-        // If we have enough transactions, create a transaction block
-        if self.get_state().pending_transactions.len() >= 10 { // Arbitrary threshold
-            let action = MorpheusAction::Block(
-                BlockAction::CreateTransactionBlock
-            );
-            self.runner.dispatch(action, 0);
-        }
+    // Public API methods
+    pub fn process_block(&mut self, block: Block) -> Vec<Effect> {
+        let (new_state, effects) = protocol::process_block(&self.state, block);
+        self.state = new_state;
+        effects
+    }
+    
+    pub fn process_vote(&mut self, vote: Vote) -> Vec<Effect> {
+        let (new_state, effects) = protocol::process_vote(&self.state, vote);
+        self.state = new_state;
+        effects
+    }
+    
+    pub fn create_transaction_block(&mut self) -> (Block, Vec<Effect>) {
+        let (new_state, block, effects) = protocol::create_transaction_block(&self.state);
+        self.state = new_state;
+        (block, effects)
+    }
+    
+    // Additional API methods (abbreviated)
+    // ...
+    
+    // Get state for inspection
+    pub fn state(&self) -> &MorpheusState {
+        &self.state
     }
 }
