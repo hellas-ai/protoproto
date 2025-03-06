@@ -114,4 +114,31 @@ fn test_mock_harness_enqueue_message() {
     
     // Check that the message was enqueued
     assert_eq!(harness.pending_messages.len(), 2);
+}
+
+#[test]
+fn test_check_invariants() {
+    // Create a test process
+    let process = MorpheusProcess::new(Identity(1), 3, 1);
+    
+    // A freshly created process should have no invariant violations
+    let violations = process.check_invariants();
+    assert!(violations.is_empty(), "New process has invariant violations: {:?}", violations);
+    
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process], 100);
+    
+    // Run for a few steps
+    harness.run(10);
+    
+    // Check that all processes maintain invariants
+    for (id, process) in &harness.processes {
+        let violations = process.check_invariants();
+        assert!(
+            violations.is_empty(),
+            "Process {} has invariant violations after simulation: {:?}",
+            id.0,
+            violations
+        );
+    }
 } 

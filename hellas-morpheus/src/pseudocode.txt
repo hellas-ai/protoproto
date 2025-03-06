@@ -102,18 +102,6 @@ function compareQCs(q, q') -> int:
     // Equal
     Return 0
 
-The genesis block. There exists a unique genesis block, denoted 𝑏𝑔. For any block 𝑏, 𝑏.type specifies
-the type of the block 𝑏, 𝑏.view is the view corresponding to the block, 𝑏.h specifies the height of
-the block, 𝑏.auth is the block creator, and 𝑏.slot specifies the slot corresponding to the block. For
-𝑏𝑔, we set:
-•𝑏𝑔.type= gen, 𝑏𝑔.view=−1, 𝑏𝑔.h= 0, 𝑏𝑔.auth= ⊥, 𝑏𝑔.slot= 0.
-A comment on the use of slots. Each block will either be the genesis block, a transaction block,
-or a leader block. If 𝑝𝑖 ∈Π is correct then, for 𝑠 ∈N≥0, 𝑝𝑖 will produce a single transaction
-block 𝑏 with 𝑏.slot= 𝑠 before producing any transaction block 𝑏′ with 𝑏′
-.slot= 𝑠 +1.
-Similarly, if 𝑝𝑖 ∈Π is correct then, for 𝑠 ∈N≥0, 𝑝𝑖 will produce a single leader block 𝑏with
-𝑏.slot= 𝑠 before producing any leader block 𝑏′with 𝑏′
-.slot= 𝑠+1.
 𝑧-votes. For 𝑧 ∈ {0,1,2}, a 𝑧-vote for the block 𝑏 is a message of the form (𝑧,𝑏.type,𝑏.view,
 𝑏.h,𝑏.auth,𝑏.slot,𝐻(𝑏)), signed by some process in Π. The reason votes include more information
 than just the hash of the block is explained in Section 4. A 𝑧-quorum for 𝑏is a set of 𝑛−𝑓 𝑧-votes
