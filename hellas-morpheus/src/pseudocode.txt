@@ -1,0 +1,217 @@
+// Algorithm 1: Morpheus - Local variables for process p_i
+// Local variables
+M_i // Initially contains b_g and a 1-QC-certificate for b_g (automatically updated)
+Q_i // Initially contains 1-QC-certificate for b_g (automatically updated)
+view_i // Initially 0, represents the present view
+slot_i(x) for x ∈ {lead, Tr} // Initially 0, represents present slot
+voted_i(z, x, s, p_j) for z ∈ {0, 1, 2}, x ∈ {lead, Tr}, s ∈ N≥0, p_j ∈ Π // Initially 0
+phase_i(v) for v ∈ N≥0 // Initially 0, represents the phase within the view
+
+// Other procedures and functions
+lead(v) // Leader of view v
+PayloadReady_i // Set to 1 when ready to produce transaction block
+MakeTrBlock_i // Sends a new transaction block to all
+LeaderReady_i // Indicates whether ready to produce leader block
+MakeLeaderBlock_i // Sends a new leader block to all
+
+// Algorithm 1: Morpheus - Instructions for process p_i
+// Process p_i executes the following transitions at timeslot t (according to its local clock), 
+// until no further transitions apply. If multiple transitions apply simultaneously, then p_i 
+// executes the first that applies, before checking whether further transitions apply, and so on.
+
+// Update view
+If there exists greatest v ≥ view_i s.t. M_i contains at least f + 1 end-view v messages then:
+    Form a (v + 1)-certificate and send it to all processes;
+
+If there exists some greatest v > view_i such that either:
+    (i) M_i contains a v-certificate q, or (ii) Q_i contains q with q.view = v, then:
+        Set view_i := v; Send (either) q to all processes;
+        Send all tips q' of Q_i such that q'.auth = p_i to lead(v);
+        Send (v, q') signed by p_i to lead(v), where q' is a maximal amongst 1-QCs seen by p_i
+
+// Send 0-votes and 0-QCs
+If M_i contains some b s.t. voted_i(0, b.type, b.slot, b.auth) = 0:
+    Send a 0-vote for b (signed by p_i) to b.auth; Set voted_i(0, b.type, b.slot, b.auth) := 1;
+
+If M_i contains a 0-quorum for some b s.t.:
+    (i) b.auth = p_i, and (ii) p_i has not previously sent a 0-QC for b to other processors, then:
+        Send a 0-QC for b to all processes;
+
+// Send out a new transaction block
+If PayloadReady_i = 1 then:
+    MakeTrBlock_i;
+
+// Send out a new leader block
+If p_i = lead(view_i), LeaderReady_i = 1, phase_i(view_i) = 0 and Q_i does not have a single tip:
+    MakeLeaderBlock_i;
+
+// Send 1 and 2-votes for transaction blocks
+If there exists b ∈ M_i with b.type = lead and b.view = view_i and
+   there does not exist unfinalized b ∈ M_i with b.type = lead and b.view = view_i then:
+    If there exists b ∈ M_i with b.type = Tr, b.view = view_i and which is a single tip of M_i s.t.:
+        (i) b.1-QC is greater than or equal to every 1-QC in Q_i and;
+        (ii) voted_i(1, Tr, b.slot, b.auth) = 0, then:
+            Send a 1-vote for b to all processes; Set phase_i(view_i) := 1;
+            Set voted_i(1, Tr, b.slot, b.auth) := 1;
+
+    If there exists a 1-QC q ∈ Q_i which is a single tip of Q_i s.t.:
+        (i) q.type = Tr and (ii) voted_i(2, Tr, q.slot, q.auth) = 0, then:
+            If there does not exist b ∈ M_i of height greater than q.h:
+                Send a 2-vote for q.b to all processes; Set phase_i(view_i) := 1;
+                Set voted_i(2, Tr, q.slot, q.auth) := 1;
+
+// Vote for a leader block
+If phase(view_i) = 0:
+    If ∃b ∈ M_i with b.type = lead, b.view = view_i, voted_i(1, lead, b.slot, b.auth) = 0 then:
+        Send a 1-vote for b to all processes; Set voted_i(1, lead, b.slot, b.auth) := 1;
+    
+    If ∃q ∈ Q_i which is a 1-QC with voted_i(2, lead, q.slot, q.auth) = 0, q.type = lead,
+       q.view = view_i, then:
+        Send a 2-vote for q.b to all processes; Set voted_i(2, lead, q.slot, q.auth) := 1;
+
+// Complain
+If ∃q ∈ Q_i which is maximal according to ⪰ amongst those that have not been finalized for
+   time 6Δ since entering view view_i:
+    Send q to lead(view_i) if not previously sent;
+
+If ∃q ∈ Q_i which has not been finalized for time 12Δ since entering view view_i:
+    Send the end-view message (view_i) signed by p_i to all processes;
+
+    // ======== Supporting Functions and Procedures for Morpheus Protocol ========
+
+// MakeTrBlock_i - Procedure for making a transaction block
+procedure MakeTrBlock_i():
+    // 1. Set basic block properties
+    Set b.type := Tr, b.auth := p_i, b.view := view_i, b.slot := slot_i(Tr)
+    
+    // 2. Set block's previous pointer
+    Let s := slot_i(Tr)
+    If s > 0 then:
+        Let q_1 ∈ Q_i be such that q_1.auth = p_i, q_1.type = Tr and q_1.slot = s - 1
+    Else:
+        Let q_1 be a 1-QC for b_g
+    Initially, set b.prev := {q_1}
+    
+    // 3. If there's a single tip, point to it as well
+    If there exists q_2 ∈ Q_i which is a single tip of Q_i then:
+        Enumerate q_2 into b.prev
+    
+    // 4. Set block height
+    If h' = max{q.h : q ∈ b.prev} then:
+        Set b.h := h' + 1
+    
+    // 5. Set 1-QC to the greatest 1-QC seen
+    Let q be the greatest 1-QC in Q_i
+    Set b.1-QC := q
+    
+    // 6. Sign and send block
+    Sign b with the values specified above
+    Send this block to all processes
+    
+    // 7. Update transaction slot
+    Set slot_i(Tr) := slot_i(Tr) + 1
+
+
+// MakeLeaderBlock_i - Procedure for making a leader block
+procedure MakeLeaderBlock_i():
+    // 1. Set basic block properties
+    Set b.type := lead, b.auth := p_i, b.view := view_i, b.slot := slot_i(lead)
+    
+    // 2. Initially set prev to tips
+    Initially, set b.prev to be the tips of Q_i
+    
+    // 3. Add pointer to previous leader block
+    Set s := slot_i(Tr) and v := view_i
+    If s > 0 then:
+        Let q ∈ Q_i be such that q.auth = p_i, q.type = lead and q.slot = s - 1
+        If b.prev does not already contain q, add q to this set
+    
+    // 4. Set block height
+    If h' = max{q.h : q ∈ b.prev} then:
+        Set b.h := h' + 1
+    
+    // 5. Handle the first leader block of the view differently
+    If p_i has not yet produced a block b with b.view = view_i and b.type = lead then:
+        // a. Include justification
+        Set b.just to be a set of view v messages signed by n - f processes in Π
+        // b. Set 1-QC
+        Set b.1-QC to be a 1-QC in Q_i greater than or equal to all 1-QCs corresponding to messages in b.just
+    
+    // 6. Handle subsequent leader blocks in the view
+    If p_i has previously produced a block b with b.view = view_i and b.type = lead then:
+        Let q' ∈ Q_i be a 1-QC with q'.auth = p_i, q'.type = lead and q'.slot = s - 1
+        Set b.1-QC := q'
+        Set b.just to be the empty set
+    
+    // 7. Sign and send block
+    Sign b with the values specified above
+    Send this block to all processes
+    
+    // 8. Update leader slot
+    Set slot_i(lead) := slot_i(lead) + 1
+
+
+// LeaderReady_i - Boolean function to determine if leader is ready to produce a block
+function LeaderReady_i() -> boolean:
+    Let v = view_i
+    
+    // Case 1: First leader block of the view
+    If process p_i has not yet produced a block b with b.view = v and b.type = lead then:
+        Return (
+            // a. Received enough view messages
+            p_i has received view v messages signed by at least n - f processes in Π AND
+            // b. Has previous leader block's QC or is at slot 0
+            (slot_i(lead) = 0 OR Q_i contains q with q.auth = p_i, q.type = lead, q.slot = slot_i(lead) - 1)
+        )
+    
+    // Case 2: Subsequent leader blocks in the view
+    If process p_i has previously produced a block b with b.view = v and b.type = lead then:
+        Return (
+            // Has 1-QC for previous leader block
+            Q_i contains a 1-QC for b' with b'.auth = p_i, b'.type = lead, b'.slot = slot_i(lead) - 1
+        )
+    
+    Return false
+
+
+// PayloadReady_i - Function to determine if ready to produce a transaction block
+// Note: Paper states it's an external function, but requires certain properties
+function PayloadReady_i() -> boolean:
+    // This is set to 1 at some timeslots by external means
+    // But must satisfy this condition:
+    If PayloadReady_i = 1 and slot_i(Tr) = s > 0 then:
+        Assert there exists q ∈ Q_i with q.auth = p_i, q.type = Tr and q.slot = s - 1
+    
+    // Actual implementation would check if there are new transactions to process
+    // and whether prerequisites are satisfied
+
+
+// lead(v) - Function to determine the leader of view v
+function lead(v) -> process:
+    Return process p_i, where i = v mod n
+
+
+// Additional Helper Functions
+
+// Function to determine if a QC is a single tip
+function isSingleTip(Q_i, q) -> boolean:
+    Return (q ⪰ q' for all q' ∈ Q_i)
+    // Where ⪰ is the observes relation defined in the paper
+
+
+// Function to compare QCs by the ordering relation ≤
+function compareQCs(q, q') -> int:
+    // Compare by view
+    If q.view < q'.view then return -1
+    If q.view > q'.view then return 1
+    
+    // Same view, compare by type (lead < Tr)
+    If q.type = lead and q'.type = Tr then return -1
+    If q.type = Tr and q'.type = lead then return 1
+    
+    // Same view and type, compare by height
+    If q.h < q'.h then return -1
+    If q.h > q'.h then return 1
+    
+    // Equal
+    Return 0
