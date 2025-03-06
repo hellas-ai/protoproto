@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use time::UtcDateTime;
 use crate::*;
 
 #[derive(Serialize, Deserialize)]
@@ -19,14 +20,14 @@ pub struct MorpheusProcess {
     pub phase_i: BTreeMap<ViewNum, Phase>,
     pub n: usize,
     pub f: usize,
-    pub delta: std::time::Duration,
+    pub delta: u128,
 
     // auxiliary
     pub end_views: VoteTrack<ViewNum>,
     pub zero_qcs_sent: BTreeSet<BlockKey>,
     pub complained_qcs: BTreeSet<VoteData>,
-    pub view_entry_time: std::time::Instant,
-    pub current_time: std::time::Instant,
+    pub view_entry_time: u128,
+    pub current_time: u128,
 
     pub vote_tracker: VoteTrack<VoteData>,
     pub start_views: BTreeMap<ViewNum, Vec<Signed<StartView>>>,
@@ -49,7 +50,8 @@ pub struct MorpheusProcess {
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 }
 
-pub struct VoteTrack<T> {
+#[derive(Serialize, Deserialize)]
+pub struct VoteTrack<T: Ord> {
     pub votes: BTreeMap<T, BTreeMap<Identity, Signed<T>>>,
 }
 
@@ -71,8 +73,6 @@ impl<T: Ord + Clone> VoteTrack<T> {
 
 impl MorpheusProcess {
     pub fn new(id: Identity, n: usize, f: usize) -> Self {
-        let now = std::time::Instant::now();
-
         // Create genesis block and its 1-QC
         let genesis_block = Signed {
             data: Arc::new(Block {
@@ -100,8 +100,6 @@ impl MorpheusProcess {
         };
 
         // Initialize with a recommended default timeout
-        let delta = std::time::Duration::from_secs(10);
-
         MorpheusProcess {
             id,
             view_i: ViewNum(0),
@@ -115,7 +113,7 @@ impl MorpheusProcess {
             },
             n,
             f,
-            delta,
+            delta: 10, // 10 ... "units"
 
             // Auxiliary fields
             end_views: VoteTrack {
@@ -123,8 +121,8 @@ impl MorpheusProcess {
             },
             zero_qcs_sent: BTreeSet::new(),
             complained_qcs: BTreeSet::new(),
-            view_entry_time: now,
-            current_time: now,
+            view_entry_time: 0,
+            current_time: 0,
 
             vote_tracker: VoteTrack {
                 votes: BTreeMap::new(),
@@ -173,7 +171,7 @@ impl MorpheusProcess {
         }
     }
 
-    pub fn set_now(&mut self, now: std::time::Instant) {
+    pub fn set_now(&mut self, now: u128) {
         self.current_time = now;
     }
 
@@ -534,7 +532,7 @@ impl MorpheusProcess {
     }
 
     pub fn check_timeouts(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        let time_in_view = self.current_time.duration_since(self.view_entry_time);
+        let time_in_view = self.current_time - self.view_entry_time;
 
         if time_in_view >= self.delta * 6 {
             let maximal_unfinalized =

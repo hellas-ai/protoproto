@@ -3,28 +3,29 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque, vec_deque},
     sync::Arc,
 };
+use serde::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum BlockType {
     Genesis,
     Lead,
     Tr,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ThreshSignature {}
 
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
 pub struct Signature {}
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Transaction {
     Opaque(Vec<u8>),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct ViewNum(pub i64);
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct SlotNum(pub u64);
 impl SlotNum {
     pub fn is_pred(&self, other: SlotNum) -> bool {
@@ -32,20 +33,20 @@ impl SlotNum {
     }
 }
 
-#[derive(PartialEq, Clone, PartialOrd, Eq, Ord, Debug)]
+#[derive(PartialEq, Clone, PartialOrd, Eq, Ord, Debug, Serialize, Deserialize)]
 pub struct Identity(pub u64);
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct BlockHash(pub u64);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Signed<T> {
     pub data: T,
     pub author: Identity,
     pub signature: Signature,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ThreshSigned<T> {
     pub data: T,
     pub signature: ThreshSignature,
@@ -57,7 +58,7 @@ impl<T> Signed<T> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct BlockKey {
     pub type_: BlockType,
     pub view: ViewNum,
@@ -76,7 +77,7 @@ pub const GEN_BLOCK_KEY: BlockKey = BlockKey {
     hash: None,
 };
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct VoteData {
     pub z: u8,
     pub for_which: BlockKey,
@@ -92,12 +93,13 @@ impl VoteData {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StartView {
     pub view: ViewNum,
     pub max_1_qc: ThreshSigned<VoteData>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub enum BlockData {
     Genesis,
     Tr {
@@ -108,6 +110,7 @@ pub enum BlockData {
     },
 }
 
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     pub key: BlockKey,
     pub prev: Vec<ThreshSigned<VoteData>>,
@@ -115,7 +118,7 @@ pub struct Block {
     pub data: BlockData,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Message {
     Block(Signed<Arc<Block>>),
     NewVote(Signed<VoteData>),
@@ -125,7 +128,7 @@ pub enum Message {
     StartView(Signed<StartView>),
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Phase {
     High = 0,
     Low = 1,
