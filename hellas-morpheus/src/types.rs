@@ -12,13 +12,13 @@ pub enum BlockType {
     Tr,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct ThreshSignature {}
 
-#[derive(PartialEq, Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Signature {}
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Transaction {
     Opaque(Vec<u8>),
 }
@@ -39,14 +39,14 @@ pub struct Identity(pub u64);
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct BlockHash(pub u64);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct Signed<T> {
     pub data: T,
     pub author: Identity,
     pub signature: Signature,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct ThreshSigned<T> {
     pub data: T,
     pub signature: ThreshSignature,
@@ -93,7 +93,7 @@ impl VoteData {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 /// Represents a view change message sent to the new leader
 ///
 /// This message is sent when a process enters a new view:
@@ -107,7 +107,7 @@ pub struct StartView {
     pub qc: ThreshSigned<VoteData>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BlockData {
     Genesis,
     Tr {
@@ -118,7 +118,7 @@ pub enum BlockData {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Block {
     pub key: BlockKey,
     pub prev: Vec<ThreshSigned<VoteData>>,
@@ -126,7 +126,7 @@ pub struct Block {
     pub data: BlockData,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Message {
     Block(Signed<Arc<Block>>),
     NewVote(Signed<VoteData>),

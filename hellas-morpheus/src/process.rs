@@ -143,6 +143,9 @@ pub struct MorpheusProcess {
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
+
+    /// All messages received by this process
+    pub received_messages: BTreeSet<Message>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -245,7 +248,7 @@ impl MorpheusProcess {
                 map.insert(genesis_qc.data.clone(), genesis_qc.clone());
                 map
             },
-            max_view: (ViewNum(0), genesis_qc.data.clone()),
+            max_view: (ViewNum(-1), genesis_qc.data.clone()),
             max_height: (0, GEN_BLOCK_KEY),
             max_1qc: genesis_qc.clone(),
             tips: vec![genesis_qc.data.clone()],
@@ -271,7 +274,7 @@ impl MorpheusProcess {
                 let mut map = BTreeMap::new();
                 map.insert(
                     (BlockType::Genesis, ViewNum(0), Identity(0)),
-                    vec![genesis_block],
+                    vec![genesis_block.clone()],
                 );
                 map
             },
@@ -280,6 +283,10 @@ impl MorpheusProcess {
                 map.insert(ViewNum(0), false);
                 map
             },
+            received_messages: BTreeSet::from([
+                Message::Block(genesis_block),
+                Message::QC(genesis_qc),
+            ]),
         }
     }
 
@@ -416,6 +423,7 @@ impl MorpheusProcess {
         message: Message,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
+        self.received_messages.insert(message.clone());
         match message {
             Message::Block(block) => {
                 if !self.block_valid(&block) {
@@ -714,6 +722,10 @@ impl MorpheusProcess {
             ));
         }
 
+        // Reconstruct Q_i - the set of QCs
+        // According to pseudocode: "Q_i stores at most one z-QC for each block"
+        let q_i_qcs: BTreeSet<&VoteData> = self.qcs.keys().collect();
+
         // Check block DAG consistency
         for (key, block) in &self.blocks {
             // Check that block key matches the block's actual key
@@ -822,15 +834,80 @@ impl MorpheusProcess {
             }
         }
 
-        // Check tips consistency
-        for tip in &self.tips {
-            // A tip should not have any blocks that observe it
-            let tip_key = &tip.for_which;
-            if let Some(pointing_blocks) = self.block_pointed_by.get(tip_key) {
-                if !pointing_blocks.is_empty() {
+        // Check tips consistency using self.observes() relation
+        // "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
+        let mut computed_tips = Vec::new();
+        for qc_data in q_i_qcs.iter() {
+            let is_tip = !q_i_qcs.iter().any(|qc_data2| {
+                // Is there any QC that observes this one and is not the same?
+                qc_data != qc_data2
+                    && self.observes((*qc_data2).clone(), qc_data)
+                    && !self.observes((*qc_data).clone(), qc_data2)
+            });
+
+            if is_tip {
+                computed_tips.push((*qc_data).clone());
+            }
+        }
+
+        // Check if our computed tips match the actual tips
+        let actual_tips_set: BTreeSet<VoteData> = self.tips.iter().cloned().collect();
+        let computed_tips_set: BTreeSet<VoteData> = computed_tips.into_iter().collect();
+
+        if actual_tips_set != computed_tips_set {
+            // Find elements in computed_tips but not in actual_tips
+            let missing_tips: Vec<_> = computed_tips_set.difference(&actual_tips_set).collect();
+
+            // Find elements in actual_tips but not in computed_tips
+            let extra_tips: Vec<_> = actual_tips_set.difference(&computed_tips_set).collect();
+
+            if !missing_tips.is_empty() {
+                violations.push(format!(
+                    "Tips is missing QCs that should be tips: {:?}",
+                    missing_tips
+                ));
+            }
+
+            if !extra_tips.is_empty() {
+                violations.push(format!(
+                    "Tips contains QCs that should not be tips: {:?}",
+                    extra_tips
+                ));
+            }
+        }
+
+        // Check finalization according to pseudocode definition:
+        // "Process p_i regards q ∈ Q_i (and q.b) as final if there exists q' ∈ Q_i such
+        // that q' ⪰ q and q is a 2-QC (for any block)."
+        for (vote_data, _) in &self.qcs {
+            // Only check 2-QCs for finalization
+            if vote_data.z == 2 {
+                let block_key = &vote_data.for_which;
+
+                // Check if any QC observes this 2-QC
+                let observed_by_any = self
+                    .qcs
+                    .keys()
+                    .any(|q_data| q_data != vote_data && self.observes(q_data.clone(), vote_data));
+
+                // According to pseudocode, this 2-QC should be final if observed by any other QC
+                let should_be_final = observed_by_any;
+
+                // Check if it's actually marked as final
+                let is_marked_final = self.finalized.get(block_key).cloned().unwrap_or(false);
+
+                if should_be_final && !is_marked_final {
                     violations.push(format!(
-                        "Tip {:?} has blocks pointing to it: {:?}",
-                        tip_key, pointing_blocks
+                        "Block {:?} with 2-QC is observed by another QC but not marked as finalized",
+                        block_key
+                    ));
+                }
+
+                // Also check the opposite - blocks marked as final should satisfy the definition
+                if is_marked_final && !should_be_final && !observed_by_any {
+                    violations.push(format!(
+                        "Block {:?} is marked as finalized but its 2-QC is not observed by any other QC",
+                        block_key
                     ));
                 }
             }
@@ -855,6 +932,28 @@ impl MorpheusProcess {
             ));
         }
 
+        // Check max_1qc maximality according to compare_qc
+        // "max_1qc is a maximal amongst 1-QCs seen by p_i"
+        if self.max_1qc.data.z != 1 {
+            violations.push(format!(
+                "max_1qc has z = {} instead of 1",
+                self.max_1qc.data.z
+            ));
+        }
+
+        // Check if max_1qc is actually maximal among all 1-QCs
+        for (vote_data, qc) in &self.qcs {
+            if vote_data.z == 1 {
+                let comparison = vote_data.compare_qc(&self.max_1qc.data);
+                if comparison == std::cmp::Ordering::Greater {
+                    violations.push(format!(
+                        "Found 1-QC {:?} that is greater than max_1qc {:?} according to compare_qc",
+                        vote_data, self.max_1qc.data
+                    ));
+                }
+            }
+        }
+
         // Check finalization consistency
         for (key, is_finalized) in &self.finalized {
             if *is_finalized {
@@ -867,8 +966,6 @@ impl MorpheusProcess {
                 }
             }
         }
-        // Check that self.finalized is consistent with self.observes.
-        // Try recomputing finalized from scratch
 
         // Check unfinalized_2qc consistency
         for vote_data in &self.unfinalized_2qc {
@@ -895,14 +992,6 @@ impl MorpheusProcess {
                     block_key
                 ));
             }
-        }
-
-        // Check max_1qc is actually a 1-QC
-        if self.max_1qc.data.z != 1 {
-            violations.push(format!(
-                "max_1qc has z = {} instead of 1",
-                self.max_1qc.data.z
-            ));
         }
 
         // Check view leader consistency
