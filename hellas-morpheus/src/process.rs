@@ -4,9 +4,11 @@ use std::{
     sync::Arc,
 };
 
-use crate::*;
+use crate::{
+    debug_impls::{format_block_key, format_vote_data},
+    *,
+};
 use serde::{Deserialize, Serialize};
-use time::UtcDateTime;
 
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
 ///
@@ -202,7 +204,7 @@ impl MorpheusProcess {
                 },
                 data: BlockData::Genesis,
             }),
-            author: Identity(0),
+            author: Identity(u64::MAX),
             signature: Signature {},
         };
 
@@ -268,12 +270,18 @@ impl MorpheusProcess {
             contains_lead_by_view: BTreeMap::new(),
             unfinalized_lead_by_view: BTreeMap::new(),
 
-            qc_index: BTreeMap::new(),
-            qc_by_view: BTreeMap::new(),
+            qc_index: BTreeMap::from([(
+                (BlockType::Genesis, Identity(u64::MAX), SlotNum(0)),
+                genesis_qc.clone(),
+            )]),
+            qc_by_view: BTreeMap::from([(
+                (BlockType::Genesis, Identity(u64::MAX), ViewNum(-1)),
+                vec![genesis_qc.clone()],
+            )]),
             block_index: {
                 let mut map = BTreeMap::new();
                 map.insert(
-                    (BlockType::Genesis, ViewNum(0), Identity(0)),
+                    (BlockType::Genesis, ViewNum(-1), Identity(u64::MAX)),
                     vec![genesis_block.clone()],
                 );
                 map
@@ -732,7 +740,8 @@ impl MorpheusProcess {
             if &block.data.key != key {
                 violations.push(format!(
                     "Block key mismatch: index key {:?} doesn't match block key {:?}",
-                    key, block.data.key
+                    format_block_key(key),
+                    format_block_key(&block.data.key)
                 ));
             }
 
@@ -743,13 +752,15 @@ impl MorpheusProcess {
                     if !pointed_blocks.contains(key) {
                         violations.push(format!(
                             "Block {:?} points to {:?} but not reflected in block_pointed_by",
-                            key, pointed_block_key
+                            format_block_key(key),
+                            format_block_key(pointed_block_key)
                         ));
                     }
                 } else {
                     violations.push(format!(
                         "Block {:?} points to {:?} which has no block_pointed_by entry",
-                        key, pointed_block_key
+                        format_block_key(key),
+                        format_block_key(pointed_block_key)
                     ));
                 }
             }
@@ -761,7 +772,7 @@ impl MorpheusProcess {
             if !self.blocks.contains_key(key) && *key != GEN_BLOCK_KEY {
                 violations.push(format!(
                     "block_pointed_by contains key {:?} but no such block exists",
-                    key
+                    format_block_key(key)
                 ));
             }
 
@@ -783,7 +794,8 @@ impl MorpheusProcess {
                 } else {
                     violations.push(format!(
                         "block_pointed_by for {:?} contains non-existent block {:?}",
-                        key, pointing_key
+                        format_block_key(key),
+                        format_block_key(pointing_key)
                     ));
                 }
             }
@@ -795,38 +807,52 @@ impl MorpheusProcess {
             if &qc.data != vote_data {
                 violations.push(format!(
                     "QC data mismatch: index data {:?} doesn't match QC data {:?}",
-                    vote_data, qc.data
+                    format_vote_data(vote_data, false),
+                    format_vote_data(&qc.data, false)
                 ));
             }
 
             // Check that QC is correctly indexed in qc_index
             let index_key = (
                 vote_data.for_which.type_,
-                vote_data.for_which.author.clone().unwrap_or(Identity(0)),
+                vote_data
+                    .for_which
+                    .author
+                    .clone()
+                    .unwrap_or(Identity(u64::MAX)),
                 vote_data.for_which.slot,
             );
             if let Some(indexed_qc) = self.qc_index.get(&index_key) {
                 if &indexed_qc.data != vote_data {
                     violations.push(format!(
                         "QC index mismatch: qc_index data {:?} doesn't match QC data {:?}",
-                        indexed_qc.data, vote_data
+                        format_vote_data(&indexed_qc.data, false),
+                        format_vote_data(vote_data, false)
                     ));
                 }
             } else {
-                violations.push(format!("QC {:?} not found in qc_index", vote_data));
+                violations.push(format!(
+                    "QC {:?} not found in qc_index:\n{:?}",
+                    vote_data, self.qc_index
+                ));
             }
 
             // Check that QC is correctly indexed in qc_by_view
             let view_key = (
                 vote_data.for_which.type_,
-                vote_data.for_which.author.clone().unwrap_or(Identity(0)),
+                vote_data
+                    .for_which
+                    .author
+                    .clone()
+                    .unwrap_or(Identity(u64::MAX)),
                 vote_data.for_which.view,
             );
             if let Some(view_qcs) = self.qc_by_view.get(&view_key) {
                 if !view_qcs.iter().any(|q| &q.data == vote_data) {
                     violations.push(format!(
                         "QC {:?} not found in qc_by_view for key {:?}",
-                        vote_data, view_key
+                        format_vote_data(vote_data, false),
+                        &view_key
                     ));
                 }
             } else {
@@ -899,7 +925,7 @@ impl MorpheusProcess {
                 if should_be_final && !is_marked_final {
                     violations.push(format!(
                         "Block {:?} with 2-QC is observed by another QC but not marked as finalized",
-                        block_key
+                        format_block_key(block_key)
                     ));
                 }
 
@@ -907,7 +933,7 @@ impl MorpheusProcess {
                 if is_marked_final && !should_be_final && !observed_by_any {
                     violations.push(format!(
                         "Block {:?} is marked as finalized but its 2-QC is not observed by any other QC",
-                        block_key
+                        format_block_key(block_key)
                     ));
                 }
             }
@@ -928,7 +954,7 @@ impl MorpheusProcess {
         if max_height > 0 && !self.blocks.contains_key(max_height_key) {
             violations.push(format!(
                 "max_height_key {:?} does not exist in blocks",
-                max_height_key
+                format_block_key(max_height_key)
             ));
         }
 
@@ -948,7 +974,8 @@ impl MorpheusProcess {
                 if comparison == std::cmp::Ordering::Greater {
                     violations.push(format!(
                         "Found 1-QC {:?} that is greater than max_1qc {:?} according to compare_qc",
-                        vote_data, self.max_1qc.data
+                        format_vote_data(vote_data, false),
+                        format_vote_data(&self.max_1qc.data, false)
                     ));
                 }
             }
@@ -972,7 +999,8 @@ impl MorpheusProcess {
             if vote_data.z != 2 {
                 violations.push(format!(
                     "VoteData {:?} in unfinalized_2qc has z = {} instead of 2",
-                    vote_data, vote_data.z
+                    format_vote_data(vote_data, false),
+                    vote_data.z
                 ));
             }
 
@@ -980,7 +1008,7 @@ impl MorpheusProcess {
             if !self.qcs.contains_key(vote_data) {
                 violations.push(format!(
                     "VoteData {:?} in unfinalized_2qc not found in qcs",
-                    vote_data
+                    format_vote_data(vote_data, false)
                 ));
             }
 
@@ -989,7 +1017,7 @@ impl MorpheusProcess {
             if !self.unfinalized.contains_key(block_key) {
                 violations.push(format!(
                     "Block {:?} for VoteData in unfinalized_2qc not found in unfinalized",
-                    block_key
+                    format_block_key(block_key)
                 ));
             }
         }

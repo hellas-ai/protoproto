@@ -82,7 +82,7 @@ fn test_complex_simulation() {
         z: 1,
         for_which: BlockKey {
             type_: BlockType::Genesis,
-            view: ViewNum(0),
+            view: ViewNum(-1),
             height: 0,
             author: None,
             slot: SlotNum(0),
@@ -115,7 +115,7 @@ fn test_message_enqueue_and_processing() {
         z: 0,
         for_which: BlockKey {
             type_: BlockType::Genesis,
-            view: ViewNum(0),
+            view: ViewNum(-1),
             height: 0,
             author: None,
             slot: SlotNum(0),
