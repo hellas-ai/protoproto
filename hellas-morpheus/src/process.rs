@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    debug_impls::{format_block_key, format_vote_data},
+    debug_impls::{format_block_key, format_message, format_vote_data},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -190,6 +190,9 @@ impl<T: Ord + Clone> VoteTrack<T> {
 
 impl MorpheusProcess {
     pub fn new(id: Identity, n: usize, f: usize) -> Self {
+        // Track process creation with tracing
+        crate::tracing_setup::register_process(&id, n, f);
+
         // Create genesis block and its 1-QC
         let genesis_block = Signed {
             data: Arc::new(Block {
@@ -429,12 +432,35 @@ impl MorpheusProcess {
     pub fn process_message(
         &mut self,
         message: Message,
+        sender: Identity,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
+        // Record message receipt for visualization
+        crate::tracing_setup::message_received(&self.id, &sender, "process_message", &message);
+
+        // Check if we've seen this message before (duplicate detection)
+        if cfg!(debug_assertions) {
+            if self.received_messages.contains(&message) {
+                tracing::debug!(
+                    process_id = ?self.id,
+                    message = ?message,
+                    "Ignoring duplicate message"
+                );
+                return false;
+            }
+        }
+
+        // Record that we've received this message
         self.received_messages.insert(message.clone());
         match message {
             Message::Block(block) => {
+                // Only process block if it's valid
                 if !self.block_valid(&block) {
+                    tracing::warn!(
+                        process_id = ?self.id,
+                        block = ?block.data.key,
+                        "Received invalid block"
+                    );
                     return false;
                 }
                 if !self.voted_i.contains(&(
@@ -461,6 +487,13 @@ impl MorpheusProcess {
                         Some(block.data.key.author.clone().expect("validated")),
                     ));
                 }
+                tracing::debug!(
+                    process_id = ?self.id,
+                    block_key = ?block.data.key,
+                    block_type = ?block.data.key.type_,
+                    view = ?block.data.key.view,
+                    "Processing block message"
+                );
                 self.record_block(block.clone(), to_send);
                 if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
                     // If ∃𝑏 ∈𝑀𝑖 with 𝑏.type= lead, 𝑏.view= view𝑖 , voted𝑖 (1,lead,𝑏.slot,𝑏.auth)= 0 then:
@@ -634,6 +667,15 @@ impl MorpheusProcess {
         new_view: ViewNum,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) {
+        // Record view change with tracing
+        crate::tracing_setup::protocol_transition(
+            &self.id,
+            "view_change",
+            self.view_i,
+            new_view,
+            Some(&format_message(&cause, false)),
+        );
+
         self.view_i = new_view;
         self.view_entry_time = self.current_time;
 

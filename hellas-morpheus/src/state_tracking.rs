@@ -11,13 +11,13 @@ impl MorpheusProcess {
     ///
     /// This implements the automatic updating of Q_i from the pseudocode:
     /// "For z ∈ {0,1,2}, if p_i receives a z-quorum or a z-QC for b,
-    /// and if Q_i does not contain a z-QC for b, then p_i automatically 
+    /// and if Q_i does not contain a z-QC for b, then p_i automatically
     /// enumerates a z-QC for b into Q_i"
-    /// 
+    ///
     /// There is a substantial amount of intricate code here that attempts to
     /// incrementally/lazily compute the appropriate messages to send based on
     /// indices and the current message being processed.
-    /// 
+    ///
     /// It's not clear that this is correct, and it may even be slower than a
     /// more naive approach if the set sizes were kept small.
     pub fn record_qc(
@@ -25,6 +25,9 @@ impl MorpheusProcess {
         qc: ThreshSigned<VoteData>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) {
+        // Track QC formation with tracing
+        crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
+
         if self.qcs.contains_key(&qc.data) {
             return;
         }
@@ -57,6 +60,13 @@ impl MorpheusProcess {
 
         if qc.data.z == 1 {
             if self.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
+                tracing_setup::protocol_transition(
+                    &self.id,
+                    "updating max 1-QC",
+                    &self.max_1qc.data,
+                    &qc.data,
+                    Some("new qc is greater than current max 1-QC"),
+                );
                 self.max_1qc = qc.clone();
             }
         }
@@ -192,9 +202,9 @@ impl MorpheusProcess {
     /// Records a new block in this process's state
     ///
     /// This implements part of the automatic updating of M_i from the pseudocode:
-    /// "Each process p_i maintains a local variable M_i, which is automatically 
+    /// "Each process p_i maintains a local variable M_i, which is automatically
     /// updated and specifies the set of all received messages."
-    /// 
+    ///
     /// It will also record any QCs that are used as pointers in the block.
     pub fn record_block(
         &mut self,
@@ -242,7 +252,7 @@ impl MorpheusProcess {
     /// • If q,q' ∈ Q_i, q.type = q'.type, q.auth = q'.auth and q.slot > q'.slot, then q ⪰ q'.
     /// • If q,q' ∈ Q_i, q.type = q'.type, q.auth = q'.auth, q.slot = q'.slot, and q.z ≥ q'.z, then q ⪰ q'."
     /// • If q,q' ∈ Q_i, q.b = b, q'.b = b', b ∈ M_i and b points to b', then q ⪰ q'."
-    /// 
+    ///
     /// Implemented as a BFS on the points-to graph combined with a direct
     /// observation check.
     pub fn observes(&self, root: VoteData, needle: &VoteData) -> bool {

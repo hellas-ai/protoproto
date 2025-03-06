@@ -23,6 +23,8 @@
 /// - `state_tracking.rs`: Manages protocol state (blocks, QCs, DAG structure)
 /// - `types.rs`: Defines protocol data types
 /// - `mock_harness.rs`: Testing framework for the protocol
+/// - `tracing_setup.rs`: Structured logging with tracing-rs
+/// - `hades/`: Web-based visualization and debugging interface
 ///
 /// ## Key Protocol Concepts
 ///
@@ -39,6 +41,27 @@ mod state_tracking;
 mod process;
 pub mod mock_harness;
 pub mod debug_impls;
+pub mod tracing_setup;
+
+// Only include hades module when building with visualization feature
+#[cfg(feature = "visualization")]
+pub mod hades;
 
 pub use types::*;
 pub use process::*;
+
+// Re-export tracing macros for convenience
+pub use tracing::{debug, error, info, trace, warn};
+
+// Initialize tracing on load
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+pub fn wasm_init() {
+    tracing_setup::init_tracing();
+}
+
+// Function to initialize tracing for non-wasm targets
+#[cfg(not(target_arch = "wasm32"))]
+pub fn init() {
+    tracing_setup::init_tracing();
+}

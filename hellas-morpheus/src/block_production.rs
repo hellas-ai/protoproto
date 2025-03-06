@@ -115,15 +115,29 @@ impl MorpheusProcess {
 
         // 6. Sign and send block
         let signed_block = Signed {
-            data: block,
+            data: block.clone(),
             author: self.id.clone(),
             signature: Signature {},
         };
-
-        to_send.push((Message::Block(signed_block), None));
-
-        // 7. Update transaction slot
+        
+        // Log block creation
+        tracing::info!(
+            process_id = ?self.id,
+            block_type = "transaction",
+            view = ?self.view_i,
+            slot = ?slot,
+            "Created transaction block"
+        );
+        
+        // Track block creation with tracing for visualization
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
+        crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
+        
+        // Broadcast block to all processes
+        to_send.push((Message::Block(signed_block.clone()), None));
+        
+        // Record block locally
+        self.record_block(signed_block, to_send);
     }
 
     // LeaderReady - Efficiently determines if leader is ready to produce a block
