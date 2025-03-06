@@ -77,7 +77,7 @@ pub const GEN_BLOCK_KEY: BlockKey = BlockKey {
     hash: None,
 };
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct VoteData {
     pub z: u8,
     pub for_which: BlockKey,
@@ -94,9 +94,17 @@ impl VoteData {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+/// Represents a view change message sent to the new leader
+///
+/// This message is sent when a process enters a new view:
+/// "Send (v, q') signed by p_i to lead(v), where q' is a maximal amongst 1-QCs seen by p_i"
 pub struct StartView {
+    /// The new view number
     pub view: ViewNum,
-    pub max_1_qc: ThreshSigned<VoteData>,
+    
+    /// The maximal 1-QC seen by this process
+    /// This is used by the new leader to determine which blocks to build upon
+    pub qc: ThreshSigned<VoteData>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

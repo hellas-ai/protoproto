@@ -224,7 +224,7 @@ impl MorpheusProcess {
             // Find max 1-QC from view messages
             let max_qc = view_messages
                 .iter()
-                .map(|msg| &msg.data.max_1_qc)
+                .map(|msg| &msg.data.qc)
                 .max_by(|a, b| a.data.compare_qc(&b.data))
                 .cloned()
                 .unwrap_or(self.max_1qc.clone());

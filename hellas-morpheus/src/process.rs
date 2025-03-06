@@ -8,64 +8,180 @@ use serde::{Deserialize, Serialize};
 use time::UtcDateTime;
 use crate::*;
 
+/// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
+/// 
+/// This struct implements the Algorithm 1 from the Morpheus pseudocode,
+/// maintaining all state required for processing messages, voting, and
+/// producing blocks according to the protocol specification.
 #[derive(Serialize, Deserialize)]
 pub struct MorpheusProcess {
+    /// Identity of this process (equivalent to p_i in the pseudocode)
     pub id: Identity,
 
-    // from the pseudocode
+    // === Core protocol variables from pseudocode ===
+    
+    /// Current view number (view_i in pseudocode)
+    /// "Initially 0, represents the present view"
     pub view_i: ViewNum,
+    
+    /// Current slot for leader blocks (slot_i(lead) in pseudocode)
+    /// "Initially 0, represents present slot" for leader blocks
     pub slot_i_lead: SlotNum,
+    
+    /// Current slot for transaction blocks (slot_i(Tr) in pseudocode)
+    /// "Initially 0, represents present slot" for transaction blocks
     pub slot_i_tr: SlotNum,
+    
+    /// Tracks which blocks this process has already voted for (voted_i(z,x,s,p_j) in pseudocode)
+    /// "Initially 0" for all combinations of z, x, s, p_j
+    /// Used to ensure process votes only once for each (z,x,s,p_j) combination
     pub voted_i: BTreeSet<(u8, BlockType, SlotNum, Identity)>,
+    
+    /// Tracks the phase within each view (phase_i(v) in pseudocode)
+    /// "Initially 0" for each view, represents high throughput (0) or low throughput (1) phase
     pub phase_i: BTreeMap<ViewNum, Phase>,
+    
+    /// Total number of processes in the system
     pub n: usize,
+    
+    /// Maximum number of faulty processes tolerated (n-f is the quorum size)
     pub f: usize,
+    
+    /// Network delay parameter (Δ in pseudocode)
+    /// Used for timeouts in the protocol (6Δ and 12Δ)
     pub delta: u128,
 
-    // auxiliary
+    // === Implementation-specific auxiliary variables ===
+    
+    /// Tracks end-view messages for view changes
+    /// Used to form (v+1)-certificates when f+1 end-view v messages are collected
     pub end_views: VoteTrack<ViewNum>,
+    
+    /// Tracks which 0-QCs have been sent to avoid duplicates
+    /// Implements "p_i has not previously sent a 0-QC for b to other processors"
     pub zero_qcs_sent: BTreeSet<BlockKey>,
+    
+    /// Tracks which QCs we've already complained about to the leader
+    /// Implements "Send q to lead(view_i) if not previously sent"
     pub complained_qcs: BTreeSet<VoteData>,
+    
+    /// Time when this process entered the current view
+    /// Used for timeout calculations (6Δ and 12Δ since entering view)
     pub view_entry_time: u128,
+    
+    /// Current logical time
     pub current_time: u128,
 
+    // === State tracking fields (corresponding to M_i and Q_i in pseudocode) ===
+    
+    /// Tracks votes for each VoteData to form quorums
+    /// Part of M_i in pseudocode - "the set of all received messages"
     pub vote_tracker: VoteTrack<VoteData>,
+    
+    /// Tracks view change messages
+    /// Used to collect view v messages with 1-QCs sent to the leader
     pub start_views: BTreeMap<ViewNum, Vec<Signed<StartView>>>,
+    
+    /// Stores QCs indexed by their VoteData
+    /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
     pub qcs: BTreeMap<VoteData, ThreshSigned<VoteData>>,
+    
+    /// Tracks the maximum view seen and its associated VoteData
     pub max_view: (ViewNum, VoteData),
+    
+    /// Tracks the maximum height block seen and its key
+    /// Used for identifying the tallest block in the DAG
     pub max_height: (usize, BlockKey),
+    
+    /// Stores the maximum 1-QC seen by this process
+    /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v), 
+    /// where q' is a maximal amongst 1-QCs seen by p_i"
     pub max_1qc: ThreshSigned<VoteData>,
+    
+    /// Stores the current tips of the block DAG
+    /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
     pub tips: Vec<VoteData>,
+    
+    /// Maps block keys to blocks (part of M_i in pseudocode)
+    /// Implements part of "the set of all received messages"
     pub blocks: BTreeMap<BlockKey, Signed<Arc<Block>>>,
+    
+    /// Tracks which blocks point to which other blocks
+    /// Used to efficiently determine the DAG structure
     pub block_pointed_by: BTreeMap<BlockKey, BTreeSet<BlockKey>>,
+    
+    /// Tracks unfinalized blocks with 2-QC
+    /// Used to identify blocks that have 2-QC but are not yet finalized
     pub unfinalized_2qc: BTreeSet<VoteData>,
+    
+    /// Maps block keys to their finalization status
+    /// Used to track which blocks have been finalized
     pub finalized: BTreeMap<BlockKey, bool>,
+    
+    /// Maps block keys to their unfinalized QCs
+    /// Used to track which QCs are not yet finalized
     pub unfinalized: BTreeMap<BlockKey, BTreeSet<VoteData>>,
+    
+    /// Tracks whether we've seen a leader block for each view
+    /// Used to implement logic that depends on leader blocks within a view
     pub contains_lead_by_view: BTreeMap<ViewNum, bool>,
+    
+    /// Maps views to sets of unfinalized leader blocks
+    /// Tracks which leader blocks are not yet finalized by view
     pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
 
+    // === Performance optimization indexes ===
+    
+    /// Quick index to QCs by block type, author, and slot
+    /// Enables O(1) lookup of QCs
     pub qc_index: BTreeMap<(BlockType, Identity, SlotNum), ThreshSigned<VoteData>>,
+    
+    /// Maps (type, author, view) to QCs for efficient retrieval
+    /// Used to find QCs for a specific block type, author, and view
     pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<ThreshSigned<VoteData>>>,
+    
+    /// Maps (type, view, author) to blocks for efficient retrieval
+    /// Used to find blocks of a specific type, view, and author
     pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Signed<Arc<Block>>>>,
+    
+    /// Tracks whether we've produced a leader block in each view
+    /// Used for leader logic to avoid producing multiple leader blocks in same view
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 }
 
 #[derive(Serialize, Deserialize)]
+/// Tracks votes for a particular data type and helps form quorums
+///
+/// This is an implementation helper that tracks votes from different processes
+/// and determines when a quorum (n-f votes) has been reached.
+/// Used for implementing the collection of votes in the protocol.
 pub struct VoteTrack<T: Ord> {
+    /// Maps vote data to a map of (voter identity -> signed vote)
+    /// Ensures we only count one vote per process and track when we reach a quorum
     pub votes: BTreeMap<T, BTreeMap<Identity, Signed<T>>>,
 }
 
+/// Error when attempting to record a duplicate vote from the same process
 pub struct Duplicate;
 
 impl<T: Ord + Clone> VoteTrack<T> {
+    /// Records a new vote and returns the number of votes collected for this data
+    ///
+    /// This helps implement the quorum formation logic from the pseudocode:
+    /// "A z-quorum for b is a set of n-f z-votes for b, each signed by a different process in Π"
+    /// Returns Err(Duplicate) if this process has already voted for this data.
     pub fn record_vote(&mut self, vote: Signed<T>) -> Result<usize, Duplicate> {
         let votes_now = self
             .votes
             .entry(vote.data.clone())
             .or_insert(BTreeMap::new());
+        
+        // Ensure each process only votes once (for safety)
         if votes_now.contains_key(&vote.author) {
             return Err(Duplicate);
         }
+        
+        // Record the vote and return the current count
         votes_now.insert(vote.author.clone(), vote);
         Ok(votes_now.len())
     }
@@ -289,7 +405,7 @@ impl MorpheusProcess {
                     }
                     if !just
                         .iter()
-                        .all(|j| block.one.data.compare_qc(&j.data.max_1_qc.data) != Ordering::Less)
+                        .all(|j| block.one.data.compare_qc(&j.data.qc.data) != Ordering::Less)
                     {
                         return false;
                     }
@@ -486,10 +602,10 @@ impl MorpheusProcess {
                 if !start_view.is_valid() {
                     return false;
                 }
-                if start_view.data.max_1_qc.data.z != 1 {
+                if start_view.data.qc.data.z != 1 {
                     return false;
                 }
-                self.record_qc(start_view.data.max_1_qc.clone(), to_send);
+                self.record_qc(start_view.data.qc.clone(), to_send);
                 self.start_views
                     .entry(start_view.data.view)
                     .or_insert(Vec::new())
@@ -510,6 +626,9 @@ impl MorpheusProcess {
         self.view_entry_time = self.current_time;
 
         to_send.push((cause, None));
+        
+        // Send all tips we've created to the new leader
+        // "Send all tips q' of Q_i such that q'.auth = p_i to lead(v)"
         for tip in &self.tips {
             if tip.for_which.author == Some(self.id.clone()) {
                 to_send.push((
@@ -522,7 +641,7 @@ impl MorpheusProcess {
             Message::StartView(Signed {
                 data: StartView {
                     view: new_view,
-                    max_1_qc: self.max_1qc.clone(),
+                    qc: self.max_1qc.clone(),
                 },
                 author: self.id.clone(),
                 signature: Signature {},
@@ -531,6 +650,13 @@ impl MorpheusProcess {
         ));
     }
 
+    /// Implements the "Complain" section from Algorithm 1
+    ///
+    /// Checks timeouts and sends complaints:
+    /// "If ∃q ∈ Q_i which is maximal according to ⪰ amongst those that have not been finalized for
+    ///  time 6Δ since entering view view_i: Send q to lead(view_i) if not previously sent;"
+    /// "If ∃q ∈ Q_i which has not been finalized for time 12Δ since entering view view_i:
+    ///  Send the end-view message (view_i) signed by p_i to all processes;"
     pub fn check_timeouts(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
         let time_in_view = self.current_time - self.view_entry_time;
 

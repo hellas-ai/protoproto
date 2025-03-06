@@ -7,6 +7,19 @@ use std::{
 use crate::*;
 
 impl MorpheusProcess {
+    /// Records a new quorum certificate in this process's state
+    ///
+    /// This implements the automatic updating of Q_i from the pseudocode:
+    /// "For z ∈ {0,1,2}, if p_i receives a z-quorum or a z-QC for b,
+    /// and if Q_i does not contain a z-QC for b, then p_i automatically 
+    /// enumerates a z-QC for b into Q_i"
+    /// 
+    /// There is a substantial amount of intricate code here that attempts to
+    /// incrementally/lazily compute the appropriate messages to send based on
+    /// indices and the current message being processed.
+    /// 
+    /// It's not clear that this is correct, and it may even be slower than a
+    /// more naive approach if the set sizes were kept small.
     pub fn record_qc(
         &mut self,
         qc: ThreshSigned<VoteData>,
@@ -15,6 +28,8 @@ impl MorpheusProcess {
         if self.qcs.contains_key(&qc.data) {
             return;
         }
+
+        // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
             self.qc_index.insert(
                 (
@@ -34,10 +49,12 @@ impl MorpheusProcess {
                 .or_insert_with(Vec::new)
                 .push(qc.clone());
         }
+        // all new qcs are unfinalized until proven otherwise
         self.unfinalized
             .entry(qc.data.for_which.clone())
             .or_default()
             .insert(qc.data.clone());
+
         if qc.data.z == 1 {
             if self.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
                 self.max_1qc = qc.clone();
@@ -46,10 +63,11 @@ impl MorpheusProcess {
         if qc.data.for_which.view > self.max_view.0 {
             self.max_view = (qc.data.for_which.view, qc.data.clone());
         }
+
         let mut tips_to_yeet = BTreeSet::new();
         for tip in &self.tips {
-            // TODO: can this be a simple observes_in_one_step?
-            // relying on monotonicty (and density?) of tips...
+            // if the qc observes some existing tip, then that tip gets yoinked
+            // in favor of the new qc
             if self.observes(qc.data.clone(), tip) {
                 tips_to_yeet.insert(tip.clone());
             }
@@ -59,6 +77,7 @@ impl MorpheusProcess {
             self.tips.retain(|tip| !tips_to_yeet.contains(tip));
             self.tips.push(qc.data.clone());
         } else {
+            // this qc still might be a new tip if none of the existing tips observe it
             if !self
                 .tips
                 .iter()
@@ -74,6 +93,8 @@ impl MorpheusProcess {
             self.unfinalized_2qc.insert(qc.data.clone());
         }
 
+        // now find all the 2-qcs that this qc can finalize
+        // TODO: justify why this is correct
         let finalized_here = self
             .unfinalized_2qc
             .iter()
@@ -91,6 +112,7 @@ impl MorpheusProcess {
             self.finalized.insert(finalized.for_which.clone(), true);
         }
 
+        // Check if we need to vote for a leader block
         if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
             if qc.data.z == 1
                 && qc.data.for_which.type_ == BlockType::Lead
@@ -122,6 +144,7 @@ impl MorpheusProcess {
             }
         }
 
+        // Check if we need to vote for a transaction block
         if qc.data.z == 1
             && self.tips.len() == 1
             && self.tips[0] == qc.data
@@ -166,6 +189,13 @@ impl MorpheusProcess {
         {}
     }
 
+    /// Records a new block in this process's state
+    ///
+    /// This implements part of the automatic updating of M_i from the pseudocode:
+    /// "Each process p_i maintains a local variable M_i, which is automatically 
+    /// updated and specifies the set of all received messages."
+    /// 
+    /// It will also record any QCs that are used as pointers in the block.
     pub fn record_block(
         &mut self,
         block: Signed<Arc<Block>>,
@@ -205,6 +235,16 @@ impl MorpheusProcess {
         }
     }
 
+    /// Determines if one QC observes another according to the observes relation ⪰
+    ///
+    /// Implements the observes relation from the pseudocode:
+    /// "We define the 'observes' relation ⪰ on Q_i to be the minimal preordering satisfying (transitivity and):
+    /// • If q,q' ∈ Q_i, q.type = q'.type, q.auth = q'.auth and q.slot > q'.slot, then q ⪰ q'.
+    /// • If q,q' ∈ Q_i, q.type = q'.type, q.auth = q'.auth, q.slot = q'.slot, and q.z ≥ q'.z, then q ⪰ q'."
+    /// • If q,q' ∈ Q_i, q.b = b, q'.b = b', b ∈ M_i and b points to b', then q ⪰ q'."
+    /// 
+    /// Implemented as a BFS on the points-to graph combined with a direct
+    /// observation check.
     pub fn observes(&self, root: VoteData, needle: &VoteData) -> bool {
         // do a BFS from root to see if it observes needle
         let mut observed = false;
@@ -226,6 +266,9 @@ impl MorpheusProcess {
         observed
     }
 
+    /// Determines if one QC directly observes another (without transitivity)
+    ///
+    /// Implements the direct observation component of the observes relation ⪰
     pub fn directly_observes(&self, qc1: &VoteData, qc2: &VoteData) -> bool {
         if qc1.for_which.type_ == qc2.for_which.type_
             && qc1.for_which.author == qc2.for_which.author

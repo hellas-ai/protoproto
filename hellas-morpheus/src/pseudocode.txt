@@ -101,3 +101,179 @@ function compareQCs(q, q') -> int:
     
     // Equal
     Return 0
+
+The genesis block. There exists a unique genesis block, denoted 𝑏𝑔. For any block 𝑏, 𝑏.type specifies
+the type of the block 𝑏, 𝑏.view is the view corresponding to the block, 𝑏.h specifies the height of
+the block, 𝑏.auth is the block creator, and 𝑏.slot specifies the slot corresponding to the block. For
+𝑏𝑔, we set:
+•𝑏𝑔.type= gen, 𝑏𝑔.view=−1, 𝑏𝑔.h= 0, 𝑏𝑔.auth= ⊥, 𝑏𝑔.slot= 0.
+A comment on the use of slots. Each block will either be the genesis block, a transaction block,
+or a leader block. If 𝑝𝑖 ∈Π is correct then, for 𝑠 ∈N≥0, 𝑝𝑖 will produce a single transaction
+block 𝑏 with 𝑏.slot= 𝑠 before producing any transaction block 𝑏′ with 𝑏′
+.slot= 𝑠 +1.
+Similarly, if 𝑝𝑖 ∈Π is correct then, for 𝑠 ∈N≥0, 𝑝𝑖 will produce a single leader block 𝑏with
+𝑏.slot= 𝑠 before producing any leader block 𝑏′with 𝑏′
+.slot= 𝑠+1.
+𝑧-votes. For 𝑧 ∈ {0,1,2}, a 𝑧-vote for the block 𝑏 is a message of the form (𝑧,𝑏.type,𝑏.view,
+𝑏.h,𝑏.auth,𝑏.slot,𝐻(𝑏)), signed by some process in Π. The reason votes include more information
+than just the hash of the block is explained in Section 4. A 𝑧-quorum for 𝑏is a set of 𝑛−𝑓 𝑧-votes
+for 𝑏, each signed by a different process in Π. A 𝑧-QC for 𝑏is the message 𝑚= (𝑧,𝑏.type,𝑏.view,
+𝑏.h,𝑏.auth,𝑏.slot,𝐻(𝑏))together with a threshold signature for 𝑚, formed from a 𝑧-quorum for 𝑏
+using the threshold signature scheme.
+QCs. By a QC for the block 𝑏, we mean a 𝑧-QC for 𝑏, for some 𝑧 ∈{0,1,2}. If 𝑞is a 𝑧-QC for 𝑏, then
+we set 𝑞.b= 𝑏, 𝑞.z = 𝑧, 𝑞.type= 𝑏.type, 𝑞.view= 𝑏.view,𝑞.h= 𝑏.h, 𝑞.auth= 𝑏.auth, 𝑞.slot= 𝑏.slot.
+
+We define a preordering ≤on QCs as follows: QCs are preordered first by view, then by type with
+lead < Tr, and then by height.3
+The variable 𝑀𝑖 . Each process 𝑝𝑖 maintains a local variable 𝑀𝑖 , which is automatically updated
+and specifies the set of all received messages. Initially, 𝑀𝑖 contains 𝑏𝑔 and a 1-QC for 𝑏𝑔.
+Transaction blocks. Each transaction block 𝑏is entirely specified by the following values:
+•𝑏.type= Tr, 𝑏.view= 𝑣 ∈N≥0, 𝑏.h= ℎ ∈N>0, 𝑏.slot= 𝑠 ∈N≥0.
+•𝑏.auth ∈Π: the block creator.
+•𝑏.Tr: a sequence of transactions.
+•𝑏.prev: a non-empty set of QCs for blocks of height < ℎ.
+•𝑏.1-QC: a 1-QC for a block of height < ℎ.
+If 𝑏.prev contains a QC for 𝑏′, then we say that 𝑏points to 𝑏′. For 𝑏to be valid, we require that it is
+of the form above and:
+(1) 𝑏is signed by 𝑏.auth.
+(2) If 𝑠 > 0, 𝑏points to 𝑏′with 𝑏′
+.type= Tr, 𝑏′
+.auth= 𝑏.auth and 𝑏′
+.slot= 𝑠−1.
+(3) If 𝑏points to 𝑏′, then 𝑏′
+.view ≤𝑏.view.
+(4) If ℎ′
+= max{𝑏′
+.h : 𝑏points to 𝑏′}, then ℎ= ℎ′+1.
+We suppose correct processes ignore transaction blocks that are not valid. In what follows we
+therefore adopt the convention that, by a ‘transaction block’, we mean a ‘valid transaction block’.
+A comment on transaction blocks. During periods of high throughput, a transaction block
+produced by 𝑝𝑖 for slot 𝑠will just point to 𝑝𝑖 ’s transaction block for slot 𝑠−1. During periods
+of low throughput, if there is a unique block 𝑏′received by 𝑝𝑖 that does not conflict with
+any other block received by 𝑝𝑖 , any transaction block 𝑏produced by 𝑝𝑖 will also point to 𝑏′
+(so that 𝑏does not conflict with 𝑏′).
+The use of 𝑏.1-QC is as follows: once correct 𝑝𝑖 sees a 1-QC 𝑞, it will not vote for any
+transaction block 𝑏unless 𝑏.1-QC is greater than or equal to 𝑞. Ultimately, this will be used
+to argue that consistency is satisfied.
+When blocks observe each other. The genesis block observes only itself. Any other block 𝑏
+observes itself and all those blocks observed by blocks that 𝑏points to. If two blocks do not observe
+each other, then they conflict. We write [𝑏]to denote the set of all blocks observed by 𝑏.
+The leader of view 𝑣. The leader of view 𝑣, denoted lead(𝑣), is process 𝑝𝑖 , where 𝑖 = 𝑣 mod 𝑛.
+End-view messages. If process 𝑝𝑖 sees insufficient progress during view 𝑣, it may send an end-view
+𝑣message of the form (𝑣), signed by 𝑝𝑖 . By a quorum of end-view 𝑣messages, we mean a set of 𝑓 +1
+end-view 𝑣 messages, each signed by a different process in Π. If 𝑝𝑖 receives a quorum of end-view 𝑣
+messages before entering view 𝑣+1, it will combine them (using the threshold signature scheme)
+to form a (𝑣+1)-certificate. Upon first seeing a (𝑣+1)-certificate, 𝑝𝑖 will send this certificate to all
+processes and enter view 𝑣+1. This ensures that, if some correct process is the first to enter view
+𝑣+1 after GST, all correct processes enter that view (or a later view) within time Δ.
+View 𝑣 messages. When 𝑝𝑖 enters view 𝑣, it will send to lead(𝑣)a view 𝑣 message of the form
+(𝑣,𝑞), signed by 𝑝𝑖 , where 𝑞is a maximal amongst 1-QCs seen by 𝑝𝑖 . We say that 𝑞is the 1-QC
+corresponding to the view 𝑣 message (𝑣,𝑞).
+
+A comment on view 𝑣 messages. The use of view 𝑣 messages is to carry out view changes
+in the same manner as PBFT. When producing the first leader block 𝑏 of the view, the
+leader must include a set of 𝑛−𝑓 view 𝑣 messages, which act as a justification for the block
+proposal: the value 𝑏.1-QC must be greater than or equal all 1-QCs corresponding to those
+𝑛−𝑓 view 𝑣 messages. For each subsequent leader block 𝑏′produced in the view, 𝑏′
+.1-QC
+must be a 1-QC for the previous leader block (i.e., that for the previous slot). The argument
+for consistency will thus employ some of the same methods as are used to argue consistency
+for PBFT.
+Leader blocks. Each leader block 𝑏is entirely specified by the following values:
+•𝑏.type= lead, 𝑏.view= 𝑣 ∈N≥0, 𝑏.h= ℎ ∈N>0, 𝑏.slot= 𝑠 ∈N≥0.
+•𝑏.auth ∈Π: the block creator.
+•𝑏.prev: a non-empty set of QCs for blocks of height < ℎ.
+•𝑏.1-QC: a 1-QC for a block of height < ℎ.
+•𝑏.just: a (possibly empty) set of view 𝑣 messages.
+As for transaction blocks, if 𝑏.prev contains a QC for 𝑏′, then we say that 𝑏points to 𝑏′. For 𝑏to be
+valid, we require that it is of the form described above and:
+(1) 𝑏is signed by 𝑏.auth and 𝑏.auth= lead(𝑣).
+(2) If 𝑏points to 𝑏′, then 𝑏′
+.view ≤𝑏.view.
+(3) If ℎ′
+= max{𝑏′
+.h : 𝑏points to 𝑏′}, then ℎ= ℎ′+1.
+(4) If 𝑠 > 0, 𝑏points to a unique 𝑏∗with 𝑏∗
+.type= lead, 𝑏∗
+.auth= 𝑏.auth and 𝑏∗
+.slot= 𝑠−1.
+(5) If 𝑠 = 0 or 𝑏∗
+.view < 𝑣, then 𝑏.just contains 𝑛−𝑓 view 𝑣 messages, each signed by a different
+process in Π. This set of messages is called a justification for the block.
+(6) If 𝑠 = 0 or 𝑏∗
+.view < 𝑣, then 𝑏.1-QC is greater than or equal to all 1-QCs corresponding to
+view 𝑣 messages in 𝑏.just.
+(7) If 𝑠 > 0 and 𝑏∗
+.view= 𝑣, then 𝑏.1-QC is a 1-QC for 𝑏∗
+.
+As with transaction blocks, we suppose correct processes ignore leader blocks that are not valid. In
+what follows we therefore adopt the convention that, by a ‘leader block’, we mean a ‘valid leader
+block’.
+A comment on leader blocks. The conditions for validity above are just those required to carry
+out a PBFT-style approach to view changes (as discussed previously). The first leader block
+of the view must include a justification for the block proposal (to guarantee consistency).
+Subsequent leader blocks in the view simply include a 1-QC for the previous leader block
+(i.e., that for the previous slot).
+The variable 𝑄𝑖 . Each process 𝑝𝑖 maintains a local variable 𝑄𝑖 , which is automatically updated
+and, for each 𝑧 ∈{0,1,2}, stores at most one 𝑧-QC for each block: For 𝑧 ∈{0,1,2}, if 𝑝𝑖 receives4 a
+𝑧-quorum or a 𝑧-QC for 𝑏, and if 𝑄𝑖 does not contain a 𝑧-QC for 𝑏, then 𝑝𝑖 automatically enumerates
+a 𝑧-QC for 𝑏into 𝑄𝑖 (either the 𝑧-QC received, or one formed from the 𝑧-quorum received).
+We define the ‘observes’ relation ⪰on 𝑄𝑖 to be the minimal preordering satisfying (transitivity
+and):
+•If 𝑞,𝑞′∈𝑄𝑖 , 𝑞.type= 𝑞′
+.type, 𝑞.auth= 𝑞′
+.auth and 𝑞.slot > 𝑞′
+.slot, then 𝑞 ⪰𝑞′
+.
+•If 𝑞,𝑞′∈𝑄𝑖 , 𝑞.type= 𝑞′
+.type, 𝑞.auth= 𝑞′
+.auth, 𝑞.slot= 𝑞′
+.slot, and 𝑞.z ≥𝑞′
+.z, then 𝑞 ⪰𝑞′
+.
+
+We note that the observes relation ⪰depends on 𝑄𝑖 and 𝑀𝑖 , and is stronger than the preordering
+≥we defined on 𝑧-QCs previously, in the following sense: if 𝑞 and 𝑞′ are 𝑧-QCs with 𝑞 ⪰𝑞′
+,
+then 𝑞 ≥𝑞′, while the converse may not hold. When we refer to the ‘greatest’ QC in a given set,
+or a ‘maximal’ QC in a given set, this is with reference to the ≥preordering, unless explicitly
+stated otherwise. If 𝑞.type= 𝑞′
+.type, 𝑞.auth= 𝑞′
+.auth and 𝑞.slot= 𝑞′
+.slot, then it will follow that
+𝑞.b= 𝑞′
+.b.
+A comment on the observes relation on 𝑄𝑖 . When 𝑝𝑖 receives 𝑞,𝑞′ ∈𝑄𝑖 , it may not be
+immediately apparent whether 𝑞.b observes 𝑞′
+.b. The observes relation defined on 𝑄𝑖 above
+is essentially that part of the observes relation on blocks that 𝑝𝑖 can testify to, given the
+messages it has received (while also distinguishing the ‘level’ of the QC).
+The tips of 𝑄𝑖 . The tips of 𝑄𝑖 are those 𝑞 ∈𝑄𝑖 such that there does not exist 𝑞′∈𝑄𝑖 with 𝑞′≻𝑞
+(i.e. 𝑞′⪰𝑞and 𝑞 ⪰̸𝑞′). The protocol ensures that 𝑄𝑖 never contains more than 2𝑛tips: The factor 2
+here comes from the fact that leader blocks produced by correct 𝑝𝑖 need not observe all transaction
+blocks produced by 𝑝𝑖 (and vice versa).
+Single tips. We say 𝑞 ∈𝑄𝑖 is a single tip of 𝑄𝑖 if 𝑞 ⪰𝑞′for all 𝑞′∈𝑄𝑖 . We say 𝑏 ∈𝑀𝑖 is a single tip
+of 𝑀𝑖 if there exists 𝑞which is a single tip of 𝑄𝑖 and 𝑏is the unique block in 𝑀𝑖 pointing to 𝑞.b.
+A comment on single tips. When a transaction block is a single tip of 𝑀𝑖 , this will enable
+𝑝𝑖 to send a 1-vote for the block. Leader blocks do not have to be single tips for correct
+processes to vote for them.
+The voted function. For each 𝑖,𝑗,𝑠, 𝑧 ∈{0,1,2}and 𝑥 ∈{lead,Tr}, the value voted𝑖 (𝑧,𝑥,𝑠,𝑝𝑗 )is
+initially 0. When 𝑝𝑖 sends a 𝑧-vote for a block 𝑏with 𝑏.type= 𝑥, 𝑏.auth= 𝑝𝑗 , and 𝑏.slot= 𝑠, it sets
+voted𝑖 (𝑧,𝑥,𝑠,𝑝𝑗 ):= 1. Once this value is set to 1, 𝑝𝑖 will not send a 𝑧-vote for any block 𝑏′with
+𝑏′
+.type= 𝑥, 𝑏′
+.auth= 𝑝𝑗 , and 𝑏′
+.slot= 𝑠.
+The phase during the view. For each 𝑖 and 𝑣, the value phase𝑖 (𝑣)is initially 0. Once 𝑝𝑖 votes
+for a transaction block during view 𝑣, it will set phase𝑖 (𝑣):= 1, and will then not vote for leader
+blocks within view 𝑣.
+A comment on the phase during a view. As noted previously, each view can be thought of
+as consisting of two phases. Initially, the leader is responsible for finalizing transactions.
+If, after some time, the protocol enters a period of low throughput, then the leader will
+stop producing leader blocks, and transactions blocks can then be finalized directly. Once
+a process votes for a transaction block, it may be considered as having entered the low
+throughput phase of the view. The requirement that it should not then vote for subsequent
+leader blocks in the view is made so as to ensure consistency between finalized leader
+blocks and transaction blocks within the view.
+When blocks are final. Process 𝑝𝑖 regards 𝑞 ∈𝑄𝑖 (and 𝑞.b) as final if there exists 𝑞′ ∈𝑄𝑖 such
+that 𝑞′⪰𝑞and 𝑞is a 2-QC (for any block).
