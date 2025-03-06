@@ -37,7 +37,7 @@ impl MorpheusHarness {
 
         // Create n processes with IDs from 0 to n-1
         for i in 0..n {
-            let id = ProcessId(i);
+            let id = ProcessId(i as u64);
             let process = MorpheusProcess::new(id, n, f);
             processes.insert(id, process);
             message_queues.insert(id, VecDeque::new());
@@ -100,7 +100,7 @@ impl MorpheusHarness {
     /// * `message` - The message to broadcast
     pub fn broadcast_message(&mut self, from: ProcessId, message: Message) {
         for i in 0..self.n {
-            let to = ProcessId(i);
+            let to = ProcessId(i as u64);
             if to != from {
                 self.send_message(from, to, message.clone());
             }
@@ -190,7 +190,7 @@ impl MorpheusHarness {
 
             // Run a step for each process
             for i in 0..self.n {
-                let id = ProcessId(i);
+                let id = ProcessId(i as u64);
                 
                 // Deliver all messages to this process
                 let delivered = self.deliver_all_messages(id);
@@ -228,7 +228,7 @@ impl MorpheusHarness {
 
         for _ in 0..steps_per_process {
             for i in 0..self.n {
-                let id = ProcessId(i);
+                let id = ProcessId(i as u64);
                 
                 // Deliver all messages to this process
                 total_messages += self.deliver_all_messages(id);

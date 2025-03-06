@@ -1,4 +1,4 @@
-use crate::types::{Message, MorpheusProcess, ViewMessage, EndViewMessage, QuorumCertificate};
+use crate::types::{EndViewMessage, Message, MorpheusProcess, QuorumCertificate, ViewMessage, ViewNum};
 
 impl MorpheusProcess {
     /// Handle view updates during a protocol step.
@@ -16,7 +16,7 @@ impl MorpheusProcess {
         if let Some(v) = self.find_greatest_view_with_enough_end_view_messages() {
             // Form a (v + 1)-certificate and send it to all processes
             let view_message = ViewMessage {
-                view: v + 1,
+                view: ViewNum(v.0 + 1),
                 qc_id: None,
                 sender: self.id,
             };
@@ -104,7 +104,7 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The greatest view with at least f+1 end-view messages, if any
-    pub fn find_greatest_view_with_enough_end_view_messages(&self) -> Option<usize> {
+    pub fn find_greatest_view_with_enough_end_view_messages(&self) -> Option<ViewNum> {
         let mut views_with_enough_messages = Vec::new();
         
         for message in &self.m_i {
@@ -123,7 +123,7 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The greatest view (greater than the current view) with a certificate, along with the certificate
-    pub fn find_greatest_view_with_certificate(&self) -> Option<(usize, crate::types::QuorumCertificate)> {
+    pub fn find_greatest_view_with_certificate(&self) -> Option<(ViewNum, crate::types::QuorumCertificate)> {
         let mut greatest_view = self.view_i;
         let mut cert = None;
         
@@ -161,7 +161,7 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The number of end-view messages for the specified view
-    pub fn count_end_view_messages(&self, view: usize) -> usize {
+    pub fn count_end_view_messages(&self, view: ViewNum) -> usize {
         self.m_i.iter().filter(|m| {
             matches!(m, Message::EndViewMsg(msg) if msg.view == view)
         }).count()

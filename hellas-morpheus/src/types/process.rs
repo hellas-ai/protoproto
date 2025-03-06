@@ -1,7 +1,14 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use crate::types::{BlockId, BlockType, Message, ProcessId, QcId, QuorumCertificate, Block};
+use crate::types::{BlockId, BlockType, Message, ProcessId, QcId, QuorumCertificate, Block, VoteKind, ViewNum, SlotNum};
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Phase {
+    High,
+    Low
+}
 
 /// The state of a process in the Morpheus consensus protocol.
 ///
@@ -16,14 +23,14 @@ pub struct MorpheusProcess {
     /// The set of quorum certificates known to this process
     pub q_i: HashSet<QuorumCertificate>,
     /// The current view number
-    pub view_i: usize,
+    pub view_i: ViewNum,
     /// The current slot number for each block type
-    pub slot_i: HashMap<BlockType, usize>,
+    pub slot_i: HashMap<BlockType, SlotNum>,
     /// Whether this process has voted for a specific block
     /// Key is (vote_num, block_id)
-    pub voted_i: HashMap<(usize, BlockId), bool>,
+    pub voted_i: HashMap<(VoteKind, BlockId), bool>,
     /// The current phase within each view
-    pub phase_i: HashMap<usize, usize>,
+    pub phase_i: HashMap<ViewNum, Phase>,
     /// Total number of processes in the system
     pub n: usize,
     /// Maximum number of faulty processes the system can tolerate

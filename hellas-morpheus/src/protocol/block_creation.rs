@@ -1,4 +1,4 @@
-use crate::types::{Block, BlockId, BlockType, Message, MorpheusProcess, QcId};
+use crate::types::{Block, BlockId, BlockType, Message, MorpheusProcess, Phase, QcId, SlotNum};
 
 impl MorpheusProcess {
     /// Handle block creation during a protocol step.
@@ -21,7 +21,7 @@ impl MorpheusProcess {
         // 2. Create new leader blocks
         if self.id == self.lead(self.view_i) && 
            self.leader_ready() && 
-           self.get_phase(self.view_i) == 0 && 
+           self.get_phase(self.view_i) == Phase::High && 
            !self.q_i.iter().any(|q| self.is_single_tip(q)) {
             let block = self.make_leader_block();
             messages_to_send.push(Message::Block(block));
@@ -74,11 +74,11 @@ impl MorpheusProcess {
             
             // Check if we have enough view messages and either slot is 0 or we have the previous leader block's QC
             return view_messages_count >= self.n - self.f && 
-                (self.slot_i[&BlockType::Lead] == 0 || 
+                (self.slot_i[&BlockType::Lead].is_initial() || 
                  self.q_i.iter().any(|q| {
                      q.id.block_id.auth == self.id && 
                      q.id.block_id.block_type == BlockType::Lead && 
-                     q.id.block_id.slot == self.slot_i[&BlockType::Lead] - 1
+                     q.id.block_id.slot.is_pred(self.slot_i[&BlockType::Lead])
                  }));
         }
         
@@ -86,7 +86,7 @@ impl MorpheusProcess {
         self.q_i.iter().any(|q| {
             q.id.block_id.auth == self.id && 
             q.id.block_id.block_type == BlockType::Lead && 
-            q.id.block_id.slot == self.slot_i[&BlockType::Lead] - 1
+            q.id.block_id.slot.is_pred(self.slot_i[&BlockType::Lead])
         })
     }
 
@@ -99,7 +99,7 @@ impl MorpheusProcess {
         let s = self.slot_i[&BlockType::Tr];
         
         // If slot is 0, we can produce a transaction block
-        if s == 0 {
+        if s.is_initial() {
             return true;
         }
         
@@ -107,7 +107,7 @@ impl MorpheusProcess {
         self.q_i.iter().any(|q| {
             q.id.block_id.auth == self.id && 
             q.id.block_id.block_type == BlockType::Tr && 
-            q.id.block_id.slot == s - 1
+            q.id.block_id.slot.is_pred(s)
         })
     }
 
@@ -121,12 +121,12 @@ impl MorpheusProcess {
         let mut prev_qcs = Vec::new();
         
         // Set block's previous pointer
-        if s > 0 {
+        if !s.is_initial() {
             // Find q_1
             for q in &self.q_i {
                 if q.id.block_id.auth == self.id && 
                    q.id.block_id.block_type == BlockType::Tr && 
-                   q.id.block_id.slot == s - 1 {
+                   q.id.block_id.slot.is_pred(s) {
                     prev_qcs.push(q.id);
                     break;
                 }
@@ -172,7 +172,7 @@ impl MorpheusProcess {
         };
         
         // Update transaction slot
-        self.slot_i.insert(BlockType::Tr, s + 1);
+        self.slot_i.insert(BlockType::Tr, s.incr());
         
         // Store the block
         self.blocks.insert(block_id, block.clone());
@@ -199,11 +199,11 @@ impl MorpheusProcess {
         }
         
         // Add pointer to previous leader block
-        if s > 0 {
+        if !s.is_initial() {
             for q in &self.q_i {
                 if q.id.block_id.auth == self.id && 
                    q.id.block_id.block_type == BlockType::Lead && 
-                   q.id.block_id.slot == s - 1 {
+                   q.id.block_id.slot.is_pred(s) {
                     // Only add if not already in prev_qcs
                     if !prev_qcs.contains(&q.id) {
                         prev_qcs.push(q.id);
@@ -270,7 +270,7 @@ impl MorpheusProcess {
             for q in &self.q_i {
                 if q.id.block_id.auth == self.id && 
                    q.id.block_id.block_type == BlockType::Lead && 
-                   q.id.block_id.slot == s - 1 {
+                   q.id.block_id.slot.is_pred(s) {
                     one_qc = Some(q.id);
                     break;
                 }
@@ -295,7 +295,7 @@ impl MorpheusProcess {
         };
         
         // Update leader slot
-        self.slot_i.insert(BlockType::Lead, s + 1);
+        self.slot_i.insert(BlockType::Lead, s.incr());
         
         // Store the block
         self.blocks.insert(block_id, block.clone());

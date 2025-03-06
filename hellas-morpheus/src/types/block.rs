@@ -1,6 +1,29 @@
 use std::hash::{Hash, Hasher};
 use std::fmt;
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SlotNum(pub u64);
+impl SlotNum {
+    pub fn is_initial(&self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn incr(&self) -> SlotNum {
+        SlotNum(self.0 + 1)
+    }
+
+    pub fn is_pred(&self, other: SlotNum) -> bool {
+        self.0 + 1 == other.0
+    }
+
+    pub fn is_succ(&self, other: SlotNum) -> bool {
+        self.0 == other.0 + 1
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ViewNum(pub u64);
+
 /// The type of a block in the Morpheus consensus protocol.
 ///
 /// The protocol defines three block types:
@@ -31,7 +54,7 @@ impl fmt::Debug for BlockType {
 ///
 /// Each process is identified by a unique ID.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProcessId(pub usize);
+pub struct ProcessId(pub u64);
 
 impl fmt::Debug for ProcessId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -53,9 +76,9 @@ pub struct BlockId {
     /// The author of the block
     pub auth: ProcessId,
     /// The view in which the block was created
-    pub view: usize,
+    pub view: ViewNum,
     /// The slot in which the block was created
-    pub slot: usize,
+    pub slot: SlotNum,
 }
 
 impl fmt::Debug for BlockId {
@@ -63,8 +86,8 @@ impl fmt::Debug for BlockId {
         write!(f, "{:?}({:?},v{},s{})", 
                self.block_type, 
                self.auth, 
-               self.view, 
-               self.slot)
+               self.view.0, 
+               self.slot.0)
     }
 }
 
@@ -101,7 +124,7 @@ pub struct Block {
     /// The 1-QC for this block (if any)
     pub one_qc: Option<QcId>,
     /// Justification for a leader block as (view, sender) pairs
-    pub justification: Vec<(usize, ProcessId)>,
+    pub justification: Vec<(ViewNum, ProcessId)>,
 }
 
 impl fmt::Debug for Block {

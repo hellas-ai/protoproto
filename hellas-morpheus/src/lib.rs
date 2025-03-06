@@ -38,8 +38,8 @@ mod tests {
     pub fn create_test_qc(
         block_type: BlockType,
         auth: ProcessId,
-        view: usize,
-        slot: usize,
+        view: ViewNum,
+        slot: SlotNum,
         height: usize,
     ) -> QuorumCertificate {
         let block_id = BlockId {
@@ -58,8 +58,8 @@ mod tests {
     pub fn create_test_block(
         block_type: BlockType,
         auth: ProcessId,
-        view: usize,
-        slot: usize,
+        view: ViewNum,
+        slot: SlotNum,
         height: usize,
         prev_qcs: Vec<QuorumCertificate>,
     ) -> Block {
@@ -106,9 +106,9 @@ mod tests {
     #[test]
     fn test_leader_selection() {
         let process = MorpheusProcess::new(ProcessId(0), 4, 1);
-        assert_eq!(process.lead(0), ProcessId(0));
-        assert_eq!(process.lead(1), ProcessId(1));
-        assert_eq!(process.lead(4), ProcessId(0));
+        assert_eq!(process.lead(ViewNum(0)), ProcessId(0));
+        assert_eq!(process.lead(ViewNum(1)), ProcessId(1));
+        assert_eq!(process.lead(ViewNum(4)), ProcessId(0));
     }
 
     #[test]
@@ -116,8 +116,8 @@ mod tests {
         let process = MorpheusProcess::new(ProcessId(0), 4, 1);
 
         // Create test QCs
-        let qc1 = create_test_qc(BlockType::Lead, ProcessId(0), 1, 0, 1);
-        let qc2 = create_test_qc(BlockType::Tr, ProcessId(0), 1, 0, 1);
+        let qc1 = create_test_qc(BlockType::Lead, ProcessId(0), ViewNum(1), SlotNum(0), 1);
+        let qc2 = create_test_qc(BlockType::Tr, ProcessId(0), ViewNum(1), SlotNum(0), 1);
 
         // Lead < Tr for same view
         assert_eq!(process.compare_qcs(&qc1, &qc2), std::cmp::Ordering::Less);
@@ -132,8 +132,8 @@ mod tests {
         let lead_block_id = BlockId {
             block_type: BlockType::Lead,
             auth: ProcessId(1),
-            view: 0,
-            slot: 0,
+            view: ViewNum(0),
+            slot: SlotNum(0),
         };
 
         // Create a leader block
@@ -154,13 +154,13 @@ mod tests {
 
         // We should have sent a 0-vote for the leader block
         assert!(messages.iter().any(|m| {
-            matches!(m, Message::Vote(vote) if vote.vote_num == 0 && vote.block_id == lead_block_id)
+            matches!(m, Message::Vote(vote) if vote.vote_num == VoteKind::Zero && vote.block_id == lead_block_id)
         }));
 
         // Now add some 0-votes to create a quorum
         for i in 2..4 {
             let vote = Vote {
-                vote_num: 0,
+                vote_num: VoteKind::Zero,
                 block_id: lead_block_id,
                 voter: ProcessId(i),
             };
@@ -189,7 +189,7 @@ mod tests {
 
         // We should have sent a 1-vote for the leader block
         assert!(messages.iter().any(|m| {
-            matches!(m, Message::Vote(vote) if vote.vote_num == 1 && vote.block_id == lead_block_id)
+            matches!(m, Message::Vote(vote) if vote.vote_num == VoteKind::One && vote.block_id == lead_block_id)
         }));
     }
 
@@ -214,12 +214,12 @@ mod tests {
         let block_id = BlockId {
             block_type: BlockType::Lead,
             auth: ProcessId(1),
-            view: 0,
-            slot: 0,
+            view: ViewNum(0),
+            slot: SlotNum(0),
         };
         
         let vote = Vote {
-            vote_num: 0,
+            vote_num: VoteKind::Zero,
             block_id,
             voter: ProcessId(0),
         };
@@ -248,8 +248,8 @@ mod tests {
         let lead_block_id = BlockId {
             block_type: BlockType::Lead,
             auth: ProcessId(0),
-            view: 0,
-            slot: 0,
+            view: ViewNum(0),
+            slot: SlotNum(0),
         };
         
         let lead_block = Block {
@@ -290,7 +290,7 @@ mod tests {
         
         // Create an end-view message to force a view change
         let end_view_msg = EndViewMessage {
-            view: 0,
+            view: ViewNum(0),
             sender: ProcessId(0),
         };
         
@@ -299,12 +299,12 @@ mod tests {
         
         // Send the same message from process 1 and 2 to establish a quorum
         let end_view_msg1 = EndViewMessage {
-            view: 0,
+            view: ViewNum(0),
             sender: ProcessId(1),
         };
         
         let end_view_msg2 = EndViewMessage {
-            view: 0,
+            view: ViewNum(0),
             sender: ProcessId(2),
         };
         
@@ -333,13 +333,13 @@ mod tests {
         harness.run_steps(5);
         
         // Create a leader block for view 0
-        let lead_qc = create_test_qc(BlockType::Tr, ProcessId(0), 0, 0, 0);
+        let lead_qc = create_test_qc(BlockType::Tr, ProcessId(0), ViewNum(0), SlotNum(0), 0);
         
         let lead_block = create_test_block(
             BlockType::Lead,
             ProcessId(0),
-            0,
-            0,
+            ViewNum(0),
+            SlotNum(0),
             1,
             vec![lead_qc],
         );
@@ -373,7 +373,7 @@ mod tests {
         // Create view change messages to move to view 1
         for i in 0..3 {
             let end_view_msg = EndViewMessage {
-                view: 0,
+                view: ViewNum(0),
                 sender: ProcessId(i),
             };
             
@@ -392,7 +392,7 @@ mod tests {
         assert!(end_view_count >= 3, "Not enough end-view messages were sent");
         
         // The leader of view 1 should be ProcessId(1)
-        assert_eq!(harness.get_process(ProcessId(0)).unwrap().lead(1), ProcessId(1));
+        assert_eq!(harness.get_process(ProcessId(0)).unwrap().lead(ViewNum(1)), ProcessId(1));
     }
 
     #[test]
@@ -416,8 +416,8 @@ mod tests {
         let lead_block = create_test_block(
             BlockType::Lead,
             ProcessId(0),
-            0,
-            0,
+            ViewNum(0),
+            SlotNum(0),
             1,
             vec![genesis_qc.clone()],
         );
@@ -440,7 +440,7 @@ mod tests {
         let vote_count = harness.get_message_history()
             .iter()
             .filter(|(_, _, msg)| {
-                matches!(msg, Message::Vote(vote) if vote.vote_num == 0 && vote.block_id == lead_block.id)
+                matches!(msg, Message::Vote(vote) if vote.vote_num == VoteKind::Zero && vote.block_id == lead_block.id)
             })
             .count();
         
@@ -482,7 +482,7 @@ mod tests {
         // so we don't assert this but just print the current phase
         let any_process_in_phase1 = (0..4).any(|i| {
             let process = harness.get_process(ProcessId(i)).unwrap();
-            process.phase_i.get(&process.view_i).map_or(0, |&phase| phase) >= 1
+            process.phase_i.get(&process.view_i).map_or(Phase::High, |&phase| phase) == Phase::Low
         });
         
         println!("Any process in phase 1 or higher: {}", any_process_in_phase1);
@@ -490,15 +490,15 @@ mod tests {
         // Check process phases
         for i in 0..4 {
             let process = harness.get_process(ProcessId(i)).unwrap();
-            let phase = process.phase_i.get(&process.view_i).map_or(0, |&p| p);
-            println!("Process {} is in phase {}", i, phase);
+            let phase = process.phase_i.get(&process.view_i).map_or(Phase::Low, |&p| p);
+            println!("Process {} is in phase {:?}", i, phase);
         }
         
         // Check if any transaction blocks were proposed
         let tr_blocks = harness.get_message_history()
             .iter()
             .filter(|(_, _, msg)| {
-                matches!(msg, Message::Block(block) if block.id.block_type == BlockType::Tr && block.id.view == 0)
+                matches!(msg, Message::Block(block) if block.id.block_type == BlockType::Tr && block.id.view == ViewNum(0))
             })
             .count();
         

@@ -1,5 +1,23 @@
-use crate::types::{Block, BlockId, ProcessId, QcId, QuorumCertificate};
+use crate::types::{Block, BlockId, ViewNum, ProcessId, QcId, QuorumCertificate};
 use std::fmt;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum VoteKind {
+    Zero,
+    One,
+    Two,
+}
+
+impl fmt::Display for VoteKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            VoteKind::Zero => write!(f, "0"),
+            VoteKind::One => write!(f, "1"),
+            VoteKind::Two => write!(f, "2"),
+        }
+    }
+}
 
 /// A vote for a block in the Morpheus protocol.
 ///
@@ -8,7 +26,7 @@ use std::fmt;
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Vote {
     /// The vote number (0, 1, or 2)
-    pub vote_num: usize,
+    pub vote_num: VoteKind,
     /// The block being voted for
     pub block_id: BlockId,
     /// The process that cast this vote
@@ -27,7 +45,7 @@ impl fmt::Debug for Vote {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ViewMessage {
     /// The view number this message refers to
-    pub view: usize,
+    pub view: ViewNum,
     /// The QC associated with this view message (if any)
     pub qc_id: Option<QcId>,
     /// The sender of the message
@@ -37,8 +55,8 @@ pub struct ViewMessage {
 impl fmt::Debug for ViewMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.qc_id {
-            Some(qc) => write!(f, "View(v{}, {:?}, {:?})", self.view, qc, self.sender),
-            None => write!(f, "View(v{}, None, {:?})", self.view, self.sender),
+            Some(qc) => write!(f, "View(v{}, {:?}, {:?})", self.view.0, qc, self.sender),
+            None => write!(f, "View(v{}, None, {:?})", self.view.0, self.sender),
         }
     }
 }
@@ -50,14 +68,14 @@ impl fmt::Debug for ViewMessage {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct EndViewMessage {
     /// The view to end
-    pub view: usize,
+    pub view: ViewNum,
     /// The sender of the message
     pub sender: ProcessId,
 }
 
 impl fmt::Debug for EndViewMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "EndView(v{}, {:?})", self.view, self.sender)
+        write!(f, "EndView(v{}, {:?})", self.view.0, self.sender)
     }
 }
 

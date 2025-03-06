@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::types::{BlockId, Message, MorpheusProcess, QcId, QuorumCertificate, Vote, BlockType};
+use crate::types::{BlockId, Message, MorpheusProcess, QcId, QuorumCertificate, Vote, BlockType, ViewNum, VoteKind, Phase};
 
 impl MorpheusProcess {
     /// Handle voting operations during a protocol step.
@@ -49,16 +49,16 @@ impl MorpheusProcess {
                 // Skip voting for Genesis blocks and blocks created by this process
                 if b.id.block_type != BlockType::Genesis && 
                    b.id.auth != self.id && 
-                   !self.has_voted(0, b.id) {
+                   !self.has_voted(VoteKind::Zero, b.id) {
                     // Send a 0-vote for block to block's author
                     let vote = Vote {
-                        vote_num: 0,
+                        vote_num: VoteKind::Zero,
                         block_id: b.id,
                         voter: self.id,
                     };
                     
                     messages_to_send.push(Message::Vote(vote));
-                    self.set_voted(0, b.id);
+                    self.set_voted(VoteKind::Zero, b.id);
                     return true; // Return after handling one vote
                 }
             }
@@ -103,24 +103,24 @@ impl MorpheusProcess {
     ///
     /// * `messages_to_send` - Collection of messages to be sent, which will be updated
     fn handle_leader_block_voting(&mut self, messages_to_send: &mut Vec<Message>) -> bool {
-        if self.get_phase(self.view_i) == 0 {
+        if self.get_phase(self.view_i) == Phase::High {
             // Look for a leader block to vote for
             for message in &self.m_i {
                 if let Message::Block(b) = message {
                     if b.id.block_type == crate::types::BlockType::Lead && 
                        b.id.view == self.view_i && 
                        b.id.auth != self.id &&  // Skip voting for our own blocks
-                       !self.has_voted(1, b.id) {
+                       !self.has_voted(VoteKind::One, b.id) {
                         
                         // Send a 1-vote for the leader block
                         let vote = Vote {
-                            vote_num: 1,
+                            vote_num: VoteKind::One,
                             block_id: b.id,
                             voter: self.id,
                         };
                         
                         messages_to_send.push(Message::Vote(vote));
-                        self.set_voted(1, b.id);
+                        self.set_voted(VoteKind::One, b.id);
                         return true; // Return after handling one vote
                     }
                 }
@@ -131,17 +131,17 @@ impl MorpheusProcess {
                 if qc.id.block_id.block_type == crate::types::BlockType::Lead && 
                    qc.id.block_id.view == self.view_i && 
                    qc.id.block_id.auth != self.id &&  // Skip voting for our own blocks
-                   !self.has_voted(2, qc.id.block_id) {
+                   !self.has_voted(VoteKind::Two, qc.id.block_id) {
                     
                     // Send a 2-vote for the block
                     let vote = Vote {
-                        vote_num: 2,
+                        vote_num: VoteKind::Two,
                         block_id: qc.id.block_id,
                         voter: self.id,
                     };
                     
                     messages_to_send.push(Message::Vote(vote));
-                    self.set_voted(2, qc.id.block_id);
+                    self.set_voted(VoteKind::Two, qc.id.block_id);
                     return true; // Return after handling one vote
                 }
             }
@@ -171,7 +171,7 @@ impl MorpheusProcess {
             let has_unfinalized_lead = self.m_i.iter().any(|m| {
                 if let Message::Block(b) = m {
                     b.id.block_type == crate::types::BlockType::Lead && b.id.view == self.view_i && 
-                    self.count_votes(2, b.id) < self.n - self.f
+                    self.count_votes(VoteKind::Two, b.id) < self.n - self.f
                 } else {
                     false
                 }
@@ -199,7 +199,7 @@ impl MorpheusProcess {
                                 }
                             }
                             
-                            if is_single_tip && !self.has_voted(1, b.id) {
+                            if is_single_tip && !self.has_voted(VoteKind::One, b.id) {
                                 // Check if its 1-QC is greater than or equal to every 1-QC in Q_i
                                 if let Some(one_qc_id) = b.one_qc {
                                     if let Some(one_qc) = self.find_qc_by_id(&one_qc_id) {
@@ -210,14 +210,14 @@ impl MorpheusProcess {
                                         if is_greatest {
                                             // Send a 1-vote for the transaction block
                                             let vote = Vote {
-                                                vote_num: 1,
+                                                vote_num: VoteKind::One,
                                                 block_id: b.id,
                                                 voter: self.id,
                                             };
                                             
                                             messages_to_send.push(Message::Vote(vote));
-                                            self.set_voted(1, b.id);
-                                            self.set_phase(self.view_i, 1);
+                                            self.set_voted(VoteKind::One, b.id);
+                                            self.set_phase(self.view_i, Phase::Low);
                                             return true; // Return after handling one vote
                                         }
                                     }
@@ -232,7 +232,7 @@ impl MorpheusProcess {
                     if qc.id.block_id.block_type == crate::types::BlockType::Tr && 
                        qc.id.block_id.auth != self.id && // Skip voting for our own blocks
                        self.is_single_tip(&qc) && 
-                       !self.has_voted(2, qc.id.block_id) {
+                       !self.has_voted(VoteKind::Two, qc.id.block_id) {
                         
                         // Check if there's no block with greater height
                         let no_greater_height_block = self.m_i.iter().all(|m| {
@@ -246,14 +246,14 @@ impl MorpheusProcess {
                         if no_greater_height_block {
                             // Send a 2-vote for the block
                             let vote = Vote {
-                                vote_num: 2,
+                                vote_num: VoteKind::Two,
                                 block_id: qc.id.block_id,
                                 voter: self.id,
                             };
                             
                             messages_to_send.push(Message::Vote(vote));
-                            self.set_voted(2, qc.id.block_id);
-                            self.set_phase(self.view_i, 1);
+                            self.set_voted(VoteKind::Two, qc.id.block_id);
+                            self.set_phase(self.view_i, Phase::Low);
                             return true; // Return after handling one vote
                         }
                     }
@@ -274,7 +274,7 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// `true` if the process has voted for the block, `false` otherwise
-    pub fn has_voted(&self, vote_num: usize, block_id: BlockId) -> bool {
+    pub fn has_voted(&self, vote_num: VoteKind, block_id: BlockId) -> bool {
         *self.voted_i.get(&(vote_num, block_id)).unwrap_or(&false)
     }
 
@@ -284,7 +284,7 @@ impl MorpheusProcess {
     ///
     /// * `vote_num` - The vote number (0, 1, or 2)
     /// * `block_id` - The ID of the block voted for
-    pub fn set_voted(&mut self, vote_num: usize, block_id: BlockId) {
+    pub fn set_voted(&mut self, vote_num: VoteKind, block_id: BlockId) {
         self.voted_i.insert((vote_num, block_id), true);
     }
 
@@ -297,8 +297,8 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The current phase number within the specified view
-    pub fn get_phase(&self, view: usize) -> usize {
-        *self.phase_i.get(&view).unwrap_or(&0)
+    pub fn get_phase(&self, view: ViewNum) -> Phase {
+        *self.phase_i.get(&view).unwrap_or(&Phase::High)
     }
 
     /// Set the phase within a view.
@@ -307,7 +307,7 @@ impl MorpheusProcess {
     ///
     /// * `view` - The view to set the phase for
     /// * `phase` - The new phase number
-    pub fn set_phase(&mut self, view: usize, phase: usize) {
+    pub fn set_phase(&mut self, view: ViewNum, phase: Phase) {
         self.phase_i.insert(view, phase);
     }
 
@@ -321,7 +321,7 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The number of votes of the specified type for the specified block
-    pub fn count_votes(&self, vote_num: usize, block_id: BlockId) -> usize {
+    pub fn count_votes(&self, vote_num: VoteKind, block_id: BlockId) -> usize {
         self.m_i.iter().filter(|m| {
             matches!(m, Message::Vote(vote) if vote.vote_num == vote_num && vote.block_id == block_id)
         }).count()
@@ -337,7 +337,7 @@ impl MorpheusProcess {
     ///
     /// `true` if the block has a 0-quorum, `false` otherwise
     pub fn has_zero_quorum(&self, block_id: BlockId) -> bool {
-        self.count_votes(0, block_id) >= self.f + 1
+        self.count_votes(VoteKind::Zero, block_id) >= self.f + 1
     }
 
     /// Check if a QC is a single tip of Q_i.

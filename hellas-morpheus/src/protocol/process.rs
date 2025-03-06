@@ -3,8 +3,7 @@ use std::cmp::{Ordering};
 use std::time::Instant;
 
 use crate::types::{
-    Block, BlockId, BlockType, EndViewMessage, Message, ProcessId, QcId, QuorumCertificate,
-    ViewMessage, Vote, MorpheusProcess
+    Block, BlockId, BlockType, EndViewMessage, Message, MorpheusProcess, Phase, ProcessId, QcId, QuorumCertificate, SlotNum, ViewMessage, ViewNum, Vote, VoteKind
 };
 
 impl MorpheusProcess {
@@ -28,8 +27,8 @@ impl MorpheusProcess {
         let genesis_block_id = BlockId {
             block_type: BlockType::Tr,
             auth: genesis_auth,
-            view: 0,
-            slot: 0,
+            view: ViewNum(0),
+            slot: SlotNum(0),
         };
         
         let genesis_block = Block {
@@ -67,17 +66,17 @@ impl MorpheusProcess {
             id,
             m_i,
             q_i,
-            view_i: 0,
+            view_i: ViewNum(0),
             slot_i: {
                 let mut map = HashMap::new();
-                map.insert(BlockType::Lead, 0);
-                map.insert(BlockType::Tr, 0);
+                map.insert(BlockType::Lead, SlotNum(0));
+                map.insert(BlockType::Tr, SlotNum(0));
                 map
             },
             voted_i: HashMap::new(),
             phase_i: {
                 let mut map = HashMap::new();
-                map.insert(0, 0);
+                map.insert(ViewNum(0), Phase::High);
                 map
             },
             n,
@@ -100,8 +99,8 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The process ID of the leader for the specified view
-    pub fn lead(&self, v: usize) -> ProcessId {
-        ProcessId(v % self.n)
+    pub fn lead(&self, v: ViewNum) -> ProcessId {
+        ProcessId(v.0 % self.n as u64)
     }
 
     /// Process a received message.
