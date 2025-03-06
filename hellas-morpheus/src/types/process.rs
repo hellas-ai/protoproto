@@ -1,13 +1,18 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use crate::types::{BlockId, BlockType, Message, ProcessId, QcId, QuorumCertificate, Block, VoteKind, ViewNum, SlotNum};
+use serde::Deserialize;
+
+use crate::types::{
+    Block, BlockId, BlockType, Message, ProcessId, QcId, QuorumCertificate, SlotNum, ViewNum,
+    VoteKind,
+};
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Phase {
     High,
-    Low
+    Low,
 }
 
 /// The state of a process in the Morpheus consensus protocol.
@@ -43,4 +48,4 @@ pub struct MorpheusProcess {
     pub blocks: HashMap<BlockId, Block>,
     /// Storage for all QCs known to this process
     pub qcs: HashMap<QcId, QuorumCertificate>,
-} 
+}

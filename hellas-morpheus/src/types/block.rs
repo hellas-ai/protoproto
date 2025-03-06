@@ -1,7 +1,10 @@
-use std::hash::{Hash, Hasher};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct SlotNum(pub u64);
 impl SlotNum {
     pub fn is_initial(&self) -> bool {
@@ -21,7 +24,8 @@ impl SlotNum {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ViewNum(pub u64);
 
 /// The type of a block in the Morpheus consensus protocol.
@@ -30,7 +34,7 @@ pub struct ViewNum(pub u64);
 /// - Genesis block (`Genesis`): The starting block of the blockchain
 /// - Leader blocks (`Lead`): Control the consensus process in each view
 /// - Transaction blocks (`Tr`): Contain actual transaction data
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockType {
     /// Genesis block that starts the blockchain
     Genesis,
@@ -53,7 +57,8 @@ impl fmt::Debug for BlockType {
 /// A process identifier within the Morpheus protocol.
 ///
 /// Each process is identified by a unique ID.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ProcessId(pub u64);
 
 impl fmt::Debug for ProcessId {
@@ -69,7 +74,7 @@ impl fmt::Debug for ProcessId {
 /// - The process that authored the block
 /// - The view in which the block was created
 /// - The slot within that view
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BlockId {
     /// The type of the block (Leader or Transaction)
     pub block_type: BlockType,
@@ -83,18 +88,18 @@ pub struct BlockId {
 
 impl fmt::Debug for BlockId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}({:?},v{},s{})", 
-               self.block_type, 
-               self.auth, 
-               self.view.0, 
-               self.slot.0)
+        write!(
+            f,
+            "{:?}({:?},v{},s{})",
+            self.block_type, self.auth, self.view.0, self.slot.0
+        )
     }
 }
 
 /// A unique identifier for a Quorum Certificate (QC).
 ///
 /// A QC references the block that it certifies.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct QcId {
     /// The identifier of the certified block
     pub block_id: BlockId,
@@ -113,7 +118,7 @@ impl fmt::Debug for QcId {
 /// - Transaction blocks: Contain actual transaction data
 ///
 /// Each block maintains references to previous blocks via their QC IDs.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Block {
     /// The block's unique identifier
     pub id: BlockId,
@@ -129,12 +134,15 @@ pub struct Block {
 
 impl fmt::Debug for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Block({:?},h{},prev:{},1qc:{},just:{})", 
-               self.id, 
-               self.height,
-               self.prev_qcs.len(),
-               if self.one_qc.is_some() { "✓" } else { "✗" },
-               self.justification.len())
+        write!(
+            f,
+            "Block({:?},h{},prev:{},1qc:{},just:{})",
+            self.id,
+            self.height,
+            self.prev_qcs.len(),
+            if self.one_qc.is_some() { "✓" } else { "✗" },
+            self.justification.len()
+        )
     }
 }
 
@@ -151,7 +159,7 @@ impl Hash for Block {
 ///
 /// A QC represents acknowledgment from a quorum of processes for a specific block.
 /// QCs are essential for the protocol's progress and safety properties.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuorumCertificate {
     /// The identifier for this QC
     pub id: QcId,
@@ -171,4 +179,4 @@ impl Hash for QuorumCertificate {
         self.height.hash(state);
         // Simplified hash implementation, focusing on stable identification
     }
-} 
+}

@@ -1,4 +1,6 @@
-use crate::types::{EndViewMessage, Message, MorpheusProcess, QuorumCertificate, ViewMessage, ViewNum};
+use crate::types::{
+    EndViewMessage, Message, MorpheusProcess, QuorumCertificate, ViewMessage, ViewNum,
+};
 
 impl MorpheusProcess {
     /// Handle view updates during a protocol step.
@@ -20,27 +22,27 @@ impl MorpheusProcess {
                 qc_id: None,
                 sender: self.id,
             };
-            
+
             messages_to_send.push(Message::ViewMsg(view_message));
             return true;
         }
-        
+
         // 2. Check for certificates for a greater view
         if let Some((v, q)) = self.find_greatest_view_with_certificate() {
             // Update view
             self.view_i = v;
             self.view_entry_time = std::time::Instant::now();
-            
+
             // Send q to all processes
             messages_to_send.push(Message::QC(q.clone()));
-            
+
             // Send all tips q' of Q_i such that q'.auth = p_i to lead(v)
             for q_prime in self.get_tips() {
                 if q_prime.id.block_id.auth == self.id {
                     messages_to_send.push(Message::QC(q_prime.clone()));
                 }
             }
-            
+
             // Send (v, q') signed by p_i to lead(v), where q' is maximal amongst 1-QCs seen by p_i
             if let Some(q_prime) = self.get_greatest_qc() {
                 let view_message = ViewMessage {
@@ -48,13 +50,13 @@ impl MorpheusProcess {
                     qc_id: Some(q_prime.id),
                     sender: self.id,
                 };
-                
+
                 messages_to_send.push(Message::ViewMsg(view_message));
             }
-            
+
             return true;
         }
-        
+
         false
     }
 
@@ -71,12 +73,12 @@ impl MorpheusProcess {
         // Check for QCs that have not been finalized for too long
         let elapsed = self.view_entry_time.elapsed();
         let delta = std::time::Duration::from_millis(100); // Arbitrary value for testing
-        
+
         // Check for QCs that have not been finalized for time 6Δ
         if elapsed >= delta.mul_f32(6.0) {
             if let Some(q) = self.find_maximal_unfinalized_qc() {
                 let lead = self.lead(self.view_i);
-                
+
                 // Send q to lead(view_i) if not previously sent
                 if lead != self.id {
                     messages_to_send.push(Message::QC(q.clone()));
@@ -84,18 +86,18 @@ impl MorpheusProcess {
                 }
             }
         }
-        
+
         // Check for QCs that have not been finalized for time 12Δ
         if elapsed >= delta.mul_f32(12.0) {
             let end_view = EndViewMessage {
                 view: self.view_i,
                 sender: self.id,
             };
-            
+
             messages_to_send.push(Message::EndViewMsg(end_view));
             return true;
         }
-        
+
         false
     }
 
@@ -106,7 +108,7 @@ impl MorpheusProcess {
     /// The greatest view with at least f+1 end-view messages, if any
     pub fn find_greatest_view_with_enough_end_view_messages(&self) -> Option<ViewNum> {
         let mut views_with_enough_messages = Vec::new();
-        
+
         for message in &self.m_i {
             if let Message::EndViewMsg(msg) = message {
                 if self.count_end_view_messages(msg.view) >= self.f + 1 && msg.view >= self.view_i {
@@ -114,7 +116,7 @@ impl MorpheusProcess {
                 }
             }
         }
-        
+
         views_with_enough_messages.into_iter().max()
     }
 
@@ -123,10 +125,12 @@ impl MorpheusProcess {
     /// # Returns
     ///
     /// The greatest view (greater than the current view) with a certificate, along with the certificate
-    pub fn find_greatest_view_with_certificate(&self) -> Option<(ViewNum, crate::types::QuorumCertificate)> {
+    pub fn find_greatest_view_with_certificate(
+        &self,
+    ) -> Option<(ViewNum, crate::types::QuorumCertificate)> {
         let mut greatest_view = self.view_i;
         let mut cert = None;
-        
+
         // Check M_i for certificates
         for message in &self.m_i {
             if let Message::QC(qc) = message {
@@ -136,7 +140,7 @@ impl MorpheusProcess {
                 }
             }
         }
-        
+
         // Check Q_i for certificates
         for qc in &self.q_i {
             if qc.id.block_id.view > greatest_view {
@@ -144,7 +148,7 @@ impl MorpheusProcess {
                 cert = Some(qc.clone());
             }
         }
-        
+
         if greatest_view > self.view_i {
             cert.map(|c| (greatest_view, c))
         } else {
@@ -162,9 +166,10 @@ impl MorpheusProcess {
     ///
     /// The number of end-view messages for the specified view
     pub fn count_end_view_messages(&self, view: ViewNum) -> usize {
-        self.m_i.iter().filter(|m| {
-            matches!(m, Message::EndViewMsg(msg) if msg.view == view)
-        }).count()
+        self.m_i
+            .iter()
+            .filter(|m| matches!(m, Message::EndViewMsg(msg) if msg.view == view))
+            .count()
     }
 
     /// Find the maximal QC that has not been finalized.
@@ -176,4 +181,4 @@ impl MorpheusProcess {
         // Find maximal QC according to the ordering relation
         self.q_i.iter().max_by(|q1, q2| self.compare_qcs(q1, q2))
     }
-} 
+}

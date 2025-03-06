@@ -1,7 +1,9 @@
-use crate::types::{Block, BlockId, ViewNum, ProcessId, QcId, QuorumCertificate};
+use crate::types::{Block, BlockId, ProcessId, QcId, QuorumCertificate, ViewNum};
 use std::fmt;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum VoteKind {
     Zero,
@@ -23,7 +25,7 @@ impl fmt::Display for VoteKind {
 ///
 /// Votes are used to form quorums and eventually create Quorum Certificates (QCs).
 /// There are three types of votes (0, 1, and 2) representing different stages of agreement.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Vote {
     /// The vote number (0, 1, or 2)
     pub vote_num: VoteKind,
@@ -35,14 +37,18 @@ pub struct Vote {
 
 impl fmt::Debug for Vote {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Vote{}({:?} by {:?})", self.vote_num, self.block_id, self.voter)
+        write!(
+            f,
+            "Vote{}({:?} by {:?})",
+            self.vote_num, self.block_id, self.voter
+        )
     }
 }
 
 /// A view message in the Morpheus protocol.
 ///
 /// View messages are used for view synchronization and view changes.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ViewMessage {
     /// The view number this message refers to
     pub view: ViewNum,
@@ -65,7 +71,7 @@ impl fmt::Debug for ViewMessage {
 ///
 /// End-view messages are used to signal that a process wants to move to a new view,
 /// typically because the current view is not making progress.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EndViewMessage {
     /// The view to end
     pub view: ViewNum,
@@ -87,7 +93,7 @@ impl fmt::Debug for EndViewMessage {
 /// - QC: A quorum certificate for a block
 /// - ViewMsg: A message related to view synchronization
 /// - EndViewMsg: A message requesting to end the current view
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Message {
     /// A block proposal
     Block(Block),
@@ -111,4 +117,4 @@ impl fmt::Debug for Message {
             Message::EndViewMsg(evm) => write!(f, "{:?}", evm),
         }
     }
-} 
+}

@@ -4,6 +4,8 @@ mod requestor;
 
 pub struct Signature;
 pub struct Pubkey;
+pub struct TokenAmount(pub u64);
+
 
 pub struct Signed<T> {
     pub data: T,
@@ -14,14 +16,24 @@ pub struct BFJob {
     pub program: String
 }
 
-pub enum SecurityPolicy {
+pub struct ExecutionPolicy {
+    pub invalidity: Option<Collateral>,
+    pub timeout: Option<TimeoutConfig>,
+}
+
+pub struct TimeoutConfig {
+    pub timeout: u64,
+    pub penalty: Collateral,
+}
+
+pub enum Collateral {
     None,
     BurnPerformanceBond { amount: u64 }
 }
 
 pub struct QuoteRequest  {
     pub job: BFJob,
-    pub security_policy: SecurityPolicy,
+    pub policy: ExecutionPolicy,
 }
 
 pub struct JobQuote {

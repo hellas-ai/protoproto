@@ -1,9 +1,10 @@
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::cmp::{Ordering};
 use std::time::Instant;
 
 use crate::types::{
-    Block, BlockId, BlockType, EndViewMessage, Message, MorpheusProcess, Phase, ProcessId, QcId, QuorumCertificate, SlotNum, ViewMessage, ViewNum, Vote, VoteKind
+    Block, BlockId, BlockType, EndViewMessage, Message, MorpheusProcess, Phase, ProcessId, QcId,
+    QuorumCertificate, SlotNum, ViewMessage, ViewNum, Vote, VoteKind,
 };
 
 impl MorpheusProcess {
@@ -30,7 +31,7 @@ impl MorpheusProcess {
             view: ViewNum(0),
             slot: SlotNum(0),
         };
-        
+
         let genesis_block = Block {
             id: genesis_block_id,
             height: 0,
@@ -38,30 +39,30 @@ impl MorpheusProcess {
             one_qc: None,
             justification: Vec::new(),
         };
-        
+
         // Create QC ID for genesis block
         let genesis_qc_id = QcId {
             block_id: genesis_block_id,
         };
-        
+
         // Create a 1-QC certificate for the genesis block
         let genesis_qc = QuorumCertificate {
             id: genesis_qc_id,
             height: 0,
         };
-        
+
         let mut m_i = HashSet::new();
         m_i.insert(Message::Block(genesis_block.clone()));
-        
+
         let mut q_i = HashSet::new();
         q_i.insert(genesis_qc.clone());
-        
+
         let mut blocks = HashMap::new();
         blocks.insert(genesis_block_id, genesis_block);
-        
+
         let mut qcs = HashMap::new();
         qcs.insert(genesis_qc_id, genesis_qc);
-        
+
         MorpheusProcess {
             id,
             m_i,
@@ -116,21 +117,21 @@ impl MorpheusProcess {
                 // Store the block
                 self.blocks.insert(block.id, block);
                 self.m_i.insert(message);
-            },
+            }
             Message::Vote(vote) => {
                 self.m_i.insert(message);
-            },
+            }
             Message::QC(qc) => {
                 self.qcs.insert(qc.id, qc.clone());
                 self.q_i.insert(qc);
                 self.m_i.insert(message);
-            },
+            }
             Message::ViewMsg(vm) => {
                 self.m_i.insert(message);
-            },
+            }
             Message::EndViewMsg(evm) => {
                 self.m_i.insert(message);
-            },
+            }
         }
     }
 
@@ -156,14 +157,14 @@ impl MorpheusProcess {
             Ordering::Greater => return Ordering::Greater,
             Ordering::Equal => {}
         }
-        
+
         // Same view, compare by type (lead < Tr)
         match (q.id.block_id.block_type, q_prime.id.block_id.block_type) {
             (BlockType::Lead, BlockType::Tr) => return Ordering::Less,
             (BlockType::Tr, BlockType::Lead) => return Ordering::Greater,
             _ => {}
         }
-        
+
         // Same view and type, compare by height
         q.height.cmp(&q_prime.height)
     }
@@ -182,7 +183,7 @@ impl MorpheusProcess {
     /// A vector of messages to be sent to other processes
     pub fn step(&mut self) -> Vec<Message> {
         let mut messages_to_send = Vec::new();
-        
+
         // According to the pseudocode, we should execute only one transition
         // at a time, in order of priority
 
@@ -190,20 +191,20 @@ impl MorpheusProcess {
         if self.handle_view_updates(&mut messages_to_send) {
             return messages_to_send;
         }
-        
+
         // 2. Then try to handle voting
         if self.handle_voting(&mut messages_to_send) {
             return messages_to_send;
         }
-        
+
         // 3. Then try to handle block creation
         if self.handle_block_creation(&mut messages_to_send) {
             return messages_to_send;
         }
-        
+
         // 4. Finally try to handle complaints
         self.handle_complaints(&mut messages_to_send);
-        
+
         messages_to_send
     }
-} 
+}

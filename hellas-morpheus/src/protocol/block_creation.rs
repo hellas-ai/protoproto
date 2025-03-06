@@ -17,17 +17,18 @@ impl MorpheusProcess {
             messages_to_send.push(Message::Block(block));
             return true;
         }
-        
+
         // 2. Create new leader blocks
-        if self.id == self.lead(self.view_i) && 
-           self.leader_ready() && 
-           self.get_phase(self.view_i) == Phase::High && 
-           !self.q_i.iter().any(|q| self.is_single_tip(q)) {
+        if self.id == self.lead(self.view_i)
+            && self.leader_ready()
+            && self.get_phase(self.view_i) == Phase::High
+            && !self.q_i.iter().any(|q| self.is_single_tip(q))
+        {
             let block = self.make_leader_block();
             messages_to_send.push(Message::Block(block));
             return true;
         }
-        
+
         false
     }
 
@@ -51,12 +52,12 @@ impl MorpheusProcess {
     /// `true` if the leader is ready to produce a block, `false` otherwise
     pub fn leader_ready(&self) -> bool {
         let v = self.view_i;
-        
+
         // Check if we are the leader
         if self.id != self.lead(v) {
             return false;
         }
-        
+
         // Case 1: First leader block of the view
         let has_produced_leader_block = self.m_i.iter().any(|m| {
             if let Message::Block(b) = m {
@@ -65,28 +66,30 @@ impl MorpheusProcess {
                 false
             }
         });
-        
+
         if !has_produced_leader_block {
             // Count view messages
-            let view_messages_count = self.m_i.iter().filter(|m| {
-                matches!(m, Message::ViewMsg(vm) if vm.view == v)
-            }).count();
-            
+            let view_messages_count = self
+                .m_i
+                .iter()
+                .filter(|m| matches!(m, Message::ViewMsg(vm) if vm.view == v))
+                .count();
+
             // Check if we have enough view messages and either slot is 0 or we have the previous leader block's QC
-            return view_messages_count >= self.n - self.f && 
-                (self.slot_i[&BlockType::Lead].is_initial() || 
-                 self.q_i.iter().any(|q| {
-                     q.id.block_id.auth == self.id && 
-                     q.id.block_id.block_type == BlockType::Lead && 
-                     q.id.block_id.slot.is_pred(self.slot_i[&BlockType::Lead])
-                 }));
+            return view_messages_count >= self.n - self.f
+                && (self.slot_i[&BlockType::Lead].is_initial()
+                    || self.q_i.iter().any(|q| {
+                        q.id.block_id.auth == self.id
+                            && q.id.block_id.block_type == BlockType::Lead
+                            && q.id.block_id.slot.is_pred(self.slot_i[&BlockType::Lead])
+                    }));
         }
-        
+
         // Case 2: Subsequent leader blocks in the view
         self.q_i.iter().any(|q| {
-            q.id.block_id.auth == self.id && 
-            q.id.block_id.block_type == BlockType::Lead && 
-            q.id.block_id.slot.is_pred(self.slot_i[&BlockType::Lead])
+            q.id.block_id.auth == self.id
+                && q.id.block_id.block_type == BlockType::Lead
+                && q.id.block_id.slot.is_pred(self.slot_i[&BlockType::Lead])
         })
     }
 
@@ -97,17 +100,17 @@ impl MorpheusProcess {
     /// `true` if the process is ready to produce a transaction block, `false` otherwise
     pub fn payload_ready(&self) -> bool {
         let s = self.slot_i[&BlockType::Tr];
-        
+
         // If slot is 0, we can produce a transaction block
         if s.is_initial() {
             return true;
         }
-        
+
         // Check if we have a QC for our previous transaction block
         self.q_i.iter().any(|q| {
-            q.id.block_id.auth == self.id && 
-            q.id.block_id.block_type == BlockType::Tr && 
-            q.id.block_id.slot.is_pred(s)
+            q.id.block_id.auth == self.id
+                && q.id.block_id.block_type == BlockType::Tr
+                && q.id.block_id.slot.is_pred(s)
         })
     }
 
@@ -119,20 +122,21 @@ impl MorpheusProcess {
     pub fn make_tr_block(&mut self) -> Block {
         let s = self.slot_i[&BlockType::Tr];
         let mut prev_qcs = Vec::new();
-        
+
         // Set block's previous pointer
         if !s.is_initial() {
             // Find q_1
             for q in &self.q_i {
-                if q.id.block_id.auth == self.id && 
-                   q.id.block_id.block_type == BlockType::Tr && 
-                   q.id.block_id.slot.is_pred(s) {
+                if q.id.block_id.auth == self.id
+                    && q.id.block_id.block_type == BlockType::Tr
+                    && q.id.block_id.slot.is_pred(s)
+                {
                     prev_qcs.push(q.id);
                     break;
                 }
             }
         }
-        
+
         // If there's a single tip, point to it as well
         for q in &self.q_i {
             if self.is_single_tip(q) {
@@ -143,17 +147,19 @@ impl MorpheusProcess {
                 break;
             }
         }
-        
+
         // Set block height
-        let height = prev_qcs.iter()
+        let height = prev_qcs
+            .iter()
             .filter_map(|qc_id| self.find_qc_by_id(qc_id))
             .map(|qc| qc.height)
             .max()
-            .unwrap_or(0) + 1;
-        
+            .unwrap_or(0)
+            + 1;
+
         // Set 1-QC to the greatest 1-QC seen
         let one_qc = self.get_greatest_qc().map(|qc| qc.id);
-        
+
         // Create the block ID
         let block_id = BlockId {
             block_type: BlockType::Tr,
@@ -161,7 +167,7 @@ impl MorpheusProcess {
             view: self.view_i,
             slot: s,
         };
-        
+
         // Create the block
         let block = Block {
             id: block_id,
@@ -170,16 +176,16 @@ impl MorpheusProcess {
             one_qc,
             justification: Vec::new(),
         };
-        
+
         // Update transaction slot
         self.slot_i.insert(BlockType::Tr, s.incr());
-        
+
         // Store the block
         self.blocks.insert(block_id, block.clone());
-        
+
         // Add block to M_i
         self.m_i.insert(Message::Block(block.clone()));
-        
+
         block
     }
 
@@ -191,19 +197,20 @@ impl MorpheusProcess {
     pub fn make_leader_block(&mut self) -> Block {
         let s = self.slot_i[&BlockType::Lead];
         let v = self.view_i;
-        
+
         // Initially set prev to tips
         let mut prev_qcs = Vec::new();
         for qc in self.get_tips() {
             prev_qcs.push(qc.id);
         }
-        
+
         // Add pointer to previous leader block
         if !s.is_initial() {
             for q in &self.q_i {
-                if q.id.block_id.auth == self.id && 
-                   q.id.block_id.block_type == BlockType::Lead && 
-                   q.id.block_id.slot.is_pred(s) {
+                if q.id.block_id.auth == self.id
+                    && q.id.block_id.block_type == BlockType::Lead
+                    && q.id.block_id.slot.is_pred(s)
+                {
                     // Only add if not already in prev_qcs
                     if !prev_qcs.contains(&q.id) {
                         prev_qcs.push(q.id);
@@ -212,14 +219,16 @@ impl MorpheusProcess {
                 }
             }
         }
-        
+
         // Set block height
-        let height = prev_qcs.iter()
+        let height = prev_qcs
+            .iter()
             .filter_map(|qc_id| self.find_qc_by_id(qc_id))
             .map(|qc| qc.height)
             .max()
-            .unwrap_or(0) + 1;
-        
+            .unwrap_or(0)
+            + 1;
+
         let has_produced_leader_block = self.m_i.iter().any(|m| {
             if let Message::Block(b) = m {
                 b.id.auth == self.id && b.id.block_type == BlockType::Lead && b.id.view == v
@@ -227,10 +236,10 @@ impl MorpheusProcess {
                 false
             }
         });
-        
+
         let mut one_qc = None;
         let mut justification = Vec::new();
-        
+
         // Handle the first leader block of the view differently
         if !has_produced_leader_block {
             // Collect view messages for justification
@@ -241,10 +250,10 @@ impl MorpheusProcess {
                     }
                 }
             }
-            
+
             // Set 1-QC to be greater than or equal to all 1-QCs in justification messages
             let mut max_qc = None;
-            
+
             for message in &self.m_i {
                 if let Message::ViewMsg(vm) = message {
                     if vm.view == v {
@@ -263,20 +272,21 @@ impl MorpheusProcess {
                     }
                 }
             }
-            
+
             one_qc = max_qc.map(|qc| qc.id);
         } else {
             // Handle subsequent leader blocks in the view
             for q in &self.q_i {
-                if q.id.block_id.auth == self.id && 
-                   q.id.block_id.block_type == BlockType::Lead && 
-                   q.id.block_id.slot.is_pred(s) {
+                if q.id.block_id.auth == self.id
+                    && q.id.block_id.block_type == BlockType::Lead
+                    && q.id.block_id.slot.is_pred(s)
+                {
                     one_qc = Some(q.id);
                     break;
                 }
             }
         }
-        
+
         // Create the block ID
         let block_id = BlockId {
             block_type: BlockType::Lead,
@@ -284,7 +294,7 @@ impl MorpheusProcess {
             view: v,
             slot: s,
         };
-        
+
         // Create the block
         let block = Block {
             id: block_id,
@@ -293,16 +303,16 @@ impl MorpheusProcess {
             one_qc,
             justification,
         };
-        
+
         // Update leader slot
         self.slot_i.insert(BlockType::Lead, s.incr());
-        
+
         // Store the block
         self.blocks.insert(block_id, block.clone());
-        
+
         // Add block to M_i
         self.m_i.insert(Message::Block(block.clone()));
-        
+
         block
     }
-} 
+}
