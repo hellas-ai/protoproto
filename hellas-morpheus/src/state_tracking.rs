@@ -7,6 +7,39 @@ use std::{
 use crate::*;
 
 impl MorpheusProcess {
+    #[tracing::instrument(skip(self, to_send))]
+    pub fn try_vote(
+        &mut self,
+        z: u8,
+        block: &BlockKey,
+        target: Option<Identity>,
+        to_send: &mut Vec<(Message, Option<Identity>)>,
+    ) -> bool {
+        let author = block.author.clone().expect("not voting for genesis block");
+
+        if !self
+            .voted_i
+            .contains(&(z, block.type_, block.slot, author.clone()))
+        {
+            self.voted_i
+                .insert((z, block.type_, block.slot, author.clone()));
+
+            let voted = Arc::new(Signed {
+                data: VoteData {
+                    z,
+                    for_which: block.clone(),
+                },
+                author: self.id.clone(),
+                signature: Signature {},
+            });
+            self.record_vote(&voted, to_send);
+            to_send.push((Message::NewVote(voted.clone()), target));
+            true
+        } else {
+            false
+        }
+    }
+
     /// Returns false if the vote is a duplicate (sender already voted there)
     #[tracing::instrument(skip(self, to_send))]
     pub fn record_vote(
@@ -316,38 +349,5 @@ impl MorpheusProcess {
             }
         }
         false
-    }
-
-    #[tracing::instrument(skip(self, to_send))]
-    pub fn try_vote(
-        &mut self,
-        z: u8,
-        block: &BlockKey,
-        target: Option<Identity>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) -> bool {
-        let author = block.author.clone().expect("not voting for genesis block");
-
-        if !self
-            .voted_i
-            .contains(&(z, block.type_, block.slot, author.clone()))
-        {
-            self.voted_i
-                .insert((z, block.type_, block.slot, author.clone()));
-
-            let voted = Arc::new(Signed {
-                data: VoteData {
-                    z,
-                    for_which: block.clone(),
-                },
-                author: self.id.clone(),
-                signature: Signature {},
-            });
-            self.record_vote(&voted, to_send);
-            to_send.push((Message::NewVote(voted.clone()), target));
-            true
-        } else {
-            false
-        }
     }
 }

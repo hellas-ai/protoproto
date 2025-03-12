@@ -2,34 +2,25 @@ use std::sync::Arc;
 
 use crate::*;
 
-// Now implement the helper functions using efficient lookups
 impl MorpheusProcess {
-    // Implementation of the try_produce_blocks method
     pub fn try_produce_blocks(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        // Check if ready to produce a transaction block
         if self.payload_ready() {
             self.make_tr_block(to_send);
         }
 
-        // Check if this process is the leader for current view and ready to produce a leader block
         if self.id == self.lead(self.view_i)
             && self.leader_ready()
             && self.phase_i.get(&self.view_i).unwrap_or(&Phase::High) == &Phase::High
             && self.tips.len() > 1
         {
-            // Only produce leader block if there's no single tip
             self.make_leader_block(to_send);
         }
     }
 
-    // PayloadReady - Efficiently determines if ready to produce a transaction block
     fn payload_ready(&self) -> bool {
-        // Check if we have transactions to process
-        let has_transactions = true; // Simplified for this implementation
+        let has_transactions = true;
 
-        // If this is not the first transaction block, ensure we have a QC for our previous block
         if self.slot_i_tr > SlotNum(0) {
-            // Use our index to efficiently check for previous block QC
             let has_prev_qc = self.qc_by_slot.contains_key(&(
                 BlockType::Tr,
                 self.id.clone(),
@@ -39,7 +30,6 @@ impl MorpheusProcess {
             return has_transactions && has_prev_qc;
         }
 
-        // For the first block, we just need transactions
         has_transactions
     }
 
@@ -59,13 +49,7 @@ impl MorpheusProcess {
                 prev_qcs.push(prev_qc.clone());
             }
         } else {
-            // For the first block, use genesis QC (should be in a known location)
-            for (vote_data, qc) in &self.qcs {
-                if vote_data.for_which.type_ == BlockType::Genesis {
-                    prev_qcs.push(qc.clone());
-                    break;
-                }
-            }
+            prev_qcs.push(self.genesis_qc.clone());
         }
 
         // 3. If there's a single tip, point to it as well
@@ -100,7 +84,7 @@ impl MorpheusProcess {
             height,
             author: Some(self.id.clone()),
             slot,
-            hash: Some(BlockHash(self.slot_i_tr.0)), // Simplified hash generation
+            hash: Some(BlockHash(self.slot_i_tr.0)),
         };
 
         // Create block with sample transaction
@@ -109,7 +93,7 @@ impl MorpheusProcess {
             prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
             one: ThreshSigned::clone(&max_1qc),
             data: BlockData::Tr {
-                transactions: vec![Transaction::Opaque(vec![0, 1, 2])], // Sample transaction
+                transactions: vec![Transaction::Opaque(vec![0, 1, 2])],
             },
         };
 
@@ -162,8 +146,11 @@ impl MorpheusProcess {
 
             // Check for previous leader block QC if not at slot 0
             let has_prev_qc = if slot.0 > 0 {
-                self.qc_by_slot
-                    .contains_key(&(BlockType::Lead, self.id.clone(), SlotNum(slot.0 - 1)))
+                self.qc_by_slot.contains_key(&(
+                    BlockType::Lead,
+                    self.id.clone(),
+                    SlotNum(slot.0 - 1),
+                ))
             } else {
                 true
             };
@@ -271,7 +258,7 @@ impl MorpheusProcess {
             height,
             author: Some(self.id.clone()),
             slot,
-            hash: Some(BlockHash(self.slot_i_lead.0)), // Simplified hash generation
+            hash: Some(BlockHash(self.slot_i_lead.0)),
         };
 
         // Create block

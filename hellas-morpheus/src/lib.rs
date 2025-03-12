@@ -40,6 +40,7 @@ mod process;
 mod invariants;
 mod state_tracking;
 mod block_production;
+mod block_validation;
 
 pub mod mock_harness;
 pub mod debug_impls;
@@ -47,6 +48,8 @@ pub mod tracing_setup;
 
 pub use types::*;
 pub use process::*;
+pub use invariants::InvariantViolation;
+pub use block_validation::BlockValidationError;
 
 // Re-export tracing macros for convenience
 pub use tracing::{debug, error, info, trace, warn};

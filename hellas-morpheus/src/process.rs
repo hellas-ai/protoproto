@@ -6,6 +6,7 @@ use std::{
 
 use crate::{
     debug_impls::{format_block_key, format_message, format_vote_data},
+    block_validation::BlockValidationError,
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -151,6 +152,9 @@ pub struct MorpheusProcess {
 
     /// All messages received by this process
     pub received_messages: BTreeSet<Message>,
+
+    pub genesis: Arc<Block>,
+    pub genesis_qc: Arc<ThreshSigned<VoteData>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -299,9 +303,12 @@ impl MorpheusProcess {
                 map
             },
             received_messages: BTreeSet::from([
-                Message::Block(genesis_block),
-                Message::QC(genesis_qc),
+                Message::Block(genesis_block.clone()),
+                Message::QC(genesis_qc.clone()),
             ]),
+
+            genesis: Arc::new(genesis_block.data.clone()),
+            genesis_qc: genesis_qc.clone(),
         }
     }
 
@@ -317,122 +324,6 @@ impl MorpheusProcess {
         Identity(view.0 as u64 % self.n as u64)
     }
 
-    pub fn block_valid(&self, block: &Signed<Block>) -> bool {
-        if !block.is_valid() {
-            return false;
-        }
-        let block = &block.data;
-        let author = if let BlockType::Genesis = block.key.type_ {
-            return block.key == GEN_BLOCK_KEY && block.prev.is_empty();
-        } else {
-            if let Some(auth) = block.key.author.clone() {
-                auth
-            } else {
-                return false;
-            }
-        };
-
-        if block.prev.is_empty() {
-            return false;
-        }
-
-        for prev in &block.prev {
-            if prev.data.for_which.view > block.key.view
-                || prev.data.for_which.height >= block.key.height
-            {
-                return false;
-            }
-        }
-
-        if block.one.data.z != 1 || block.one.data.for_which.height >= block.key.height {
-            return false;
-        }
-
-        match block.prev.iter().max_by_key(|qc| qc.data.for_which.height) {
-            None => (),
-            Some(qc_max_height) => {
-                if block.key.height != qc_max_height.data.for_which.height + 1 {
-                    return false;
-                }
-            }
-        }
-
-        match &block.data {
-            BlockData::Genesis => {
-                if block.key.type_ != BlockType::Genesis {
-                    return false;
-                }
-            }
-            BlockData::Tr { transactions } => {
-                if block.key.type_ != BlockType::Tr {
-                    return false;
-                }
-                if block.key.slot > SlotNum(0) {
-                    if !block.prev.iter().any(|qc| {
-                        qc.data.for_which.type_ == BlockType::Tr
-                            && qc.data.for_which.author == Some(author.clone())
-                            && qc.data.for_which.slot.is_pred(block.key.slot)
-                    }) {
-                        return false;
-                    }
-                }
-                if transactions.len() == 0 {
-                    return false;
-                }
-            }
-            BlockData::Lead { justification } => {
-                if block.key.type_ != BlockType::Lead {
-                    return false;
-                }
-                if !self.verify_leader(block.key.author.clone().unwrap(), block.key.view) {
-                    return false;
-                }
-                let prev_leader_for: Vec<&ThreshSigned<VoteData>> = block
-                    .prev
-                    .iter()
-                    .filter(|qc| {
-                        qc.data.for_which.type_ == BlockType::Lead
-                            && qc.data.for_which.author == Some(author.clone())
-                            && qc.data.for_which.slot.is_pred(block.key.slot)
-                    })
-                    .collect();
-
-                if block.key.slot > SlotNum(0) {
-                    if prev_leader_for.len() != 1 {
-                        return false;
-                    }
-
-                    if prev_leader_for[0].data.for_which.view == block.key.view {
-                        if block.one.data.for_which != prev_leader_for[0].data.for_which {
-                            return false;
-                        }
-                    }
-                }
-
-                if block.key.slot == SlotNum(0)
-                    || prev_leader_for[0].data.for_which.view < block.key.view
-                {
-                    let mut just: Vec<Signed<StartView>> = justification.clone();
-                    just.sort_by(|m1, m2| m1.author.cmp(&m2.author));
-
-                    if just.len() != self.n - self.f {
-                        return false;
-                    }
-                    if !just.iter().all(|j| j.is_valid()) {
-                        return false;
-                    }
-                    if !just
-                        .iter()
-                        .all(|j| block.one.data.compare_qc(&j.data.qc.data) != Ordering::Less)
-                    {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        true
-    }
     pub fn process_message(
         &mut self,
         message: Message,
@@ -463,11 +354,11 @@ impl MorpheusProcess {
         self.received_messages.insert(message.clone());
         match message {
             Message::Block(block) => {
-                // Only process block if it's valid
-                if !self.block_valid(&block) {
+                if let Err(error) = self.block_valid(&block) {
                     tracing::warn!(
                         process_id = ?self.id,
                         block = ?block.data.key,
+                        error = ?error,
                         "Received invalid block"
                     );
                     return false;
@@ -483,11 +374,10 @@ impl MorpheusProcess {
                     block_key = ?block.data.key,
                     block_type = ?block.data.key.type_,
                     view = ?block.data.key.view,
-                    "Processing block message"
+                    "Processing valid block"
                 );
                 self.record_block(&block, to_send);
                 if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
-                    // If ∃𝑏 ∈𝑀𝑖 with 𝑏.type= lead, 𝑏.view= view𝑖 , voted𝑖 (1,lead,𝑏.slot,𝑏.auth)= 0 then:
                     if block.data.key.type_ == BlockType::Lead && block.data.key.view == self.view_i
                     {
                         self.try_vote(1, &block.data.key, None, to_send);
@@ -532,6 +422,9 @@ impl MorpheusProcess {
                 self.record_vote(&vote_data, to_send);
             }
             Message::QC(qc) => {
+                if !qc.is_valid() {
+                    return false;
+                }
                 self.record_qc(&qc, to_send);
                 if self.max_view.0 > self.view_i {
                     self.end_view(
