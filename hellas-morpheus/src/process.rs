@@ -561,6 +561,9 @@ impl MorpheusProcess {
                 }
             }
             Message::EndViewCert(end_view_cert) => {
+                if !end_view_cert.is_valid() {
+                    return false;
+                }
                 let view = end_view_cert.data;
                 if view >= self.view_i {
                     self.end_view(Message::EndViewCert(end_view_cert), view, to_send);

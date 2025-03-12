@@ -1,7 +1,7 @@
 use crate::debug_impls::*;
 use crate::*;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 /// Represents a violation of an internal state invariant
@@ -115,6 +115,14 @@ pub enum InvariantViolation {
     LeaderVerificationFailed {
         leader: Identity,
         view: ViewNum,
+    },
+
+    // Vote tracking consistency
+    VoteTrackContainsDuplicateVotes {
+        vote_data: VoteData,
+    },
+    MissingQCDespiteQuorum {
+        vote_data: VoteData,
     },
 }
 
@@ -294,6 +302,18 @@ impl fmt::Display for InvariantViolation {
                 f,
                 "Current leader {} for view {} fails verification",
                 leader.0, view.0
+            ),
+
+            Self::VoteTrackContainsDuplicateVotes { vote_data } => write!(
+                f,
+                "VoteData {:?} in vote_tracker contains duplicate votes",
+                format_vote_data(vote_data, false)
+            ),
+
+            Self::MissingQCDespiteQuorum { vote_data } => write!(
+                f,
+                "Quorum present for {:?} but no corresponding QC found",
+                format_vote_data(vote_data, false)
             ),
         }
     }
@@ -607,6 +627,31 @@ impl MorpheusProcess {
                 view: self.view_i,
             });
         }
+
+        for (vote_data, _) in &self.vote_tracker.votes {
+            if self.vote_tracker.votes[vote_data].len() > 1 {
+                violations.push(InvariantViolation::VoteTrackContainsDuplicateVotes { vote_data: vote_data.clone() });
+            }
+        }
+
+        // Count all the voting messages manually and check that a QC is present for each with quorum
+        let mut vote_counts = BTreeMap::new();
+        for msg in &self.received_messages {
+            match msg {
+                Message::NewVote(vote) => {
+                    *vote_counts.entry(vote.data.clone()).or_insert(0) += 1;
+                }
+                _ => {}
+            }
+        }
+        for (vote_data, count) in &vote_counts {
+            if count >= &((self.n - self.f) as u32) {
+                if !self.qcs.contains_key(vote_data) {
+                    violations.push(InvariantViolation::MissingQCDespiteQuorum { vote_data: vote_data.clone() });
+                }
+            }
+        }
+
 
         violations
     }

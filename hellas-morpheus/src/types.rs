@@ -50,6 +50,12 @@ pub struct ThreshSigned<T> {
     pub signature: ThreshSignature,
 }
 
+impl<T> ThreshSigned<T> {
+    pub fn is_valid(&self) -> bool {
+        true
+    }
+}
+
 impl<T> Signed<T> {
     pub fn is_valid(&self) -> bool {
         true
