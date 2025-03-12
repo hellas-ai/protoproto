@@ -5,6 +5,8 @@ use std::{
 };
 use serde::{Serialize, Deserialize};
 
+use crate::debug_impls;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum BlockType {
     Genesis,
@@ -136,7 +138,13 @@ pub enum Message {
     StartView(Signed<StartView>),
 }
 
-#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", debug_impls::format_message(self, true))
+    }
+}
+
+#[derive(Copy, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Phase {
     High = 0,
     Low = 1,

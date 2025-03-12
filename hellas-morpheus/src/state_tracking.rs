@@ -7,6 +7,42 @@ use std::{
 use crate::*;
 
 impl MorpheusProcess {
+    /// Returns false if the vote is a duplicate (sender already voted there)
+    #[tracing::instrument(skip(self))]
+    pub fn record_vote(
+        &mut self,
+        vote_data: &Signed<VoteData>,
+        to_send: &mut Vec<(Message, Option<Identity>)>,
+    ) -> bool {
+        match self.vote_tracker.record_vote(vote_data.clone()) {
+            Ok(num_votes) => {
+                if num_votes == self.n - self.f {
+                    // TODO: real crypto
+                    let quorum_formed = ThreshSigned {
+                        data: vote_data.data.clone(),
+                        signature: ThreshSignature {},
+                    };
+                    if vote_data.data.z == 0
+                        && vote_data.data.for_which.author.as_ref() == Some(&self.id)
+                        && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
+                    {
+                        self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
+                        to_send.push((Message::QC(quorum_formed.clone()), None));
+                    }
+                    self.record_qc(
+                        ThreshSigned {
+                            data: vote_data.data.clone(),
+                            signature: ThreshSignature {},
+                        },
+                        to_send,
+                    );
+                }
+                true
+            }
+            Err(Duplicate) => false,
+        }
+    }
+
     /// Records a new quorum certificate in this process's state
     ///
     /// This implements the automatic updating of Q_i from the pseudocode:
@@ -25,7 +61,6 @@ impl MorpheusProcess {
         qc: ThreshSigned<VoteData>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) {
-        // Track QC formation with tracing
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
         if self.qcs.contains_key(&qc.data) {
@@ -52,6 +87,7 @@ impl MorpheusProcess {
                 .or_insert_with(Vec::new)
                 .push(qc.clone());
         }
+
         // all new qcs are unfinalized until proven otherwise
         self.unfinalized
             .entry(qc.data.for_which.clone())
@@ -59,6 +95,8 @@ impl MorpheusProcess {
             .insert(qc.data.clone());
 
         if qc.data.z == 1 {
+            self.all_1qc.insert(qc.clone());
+
             if self.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
                 tracing_setup::protocol_transition(
                     &self.id,
@@ -70,9 +108,14 @@ impl MorpheusProcess {
                 self.max_1qc = qc.clone();
             }
         }
+
         if qc.data.for_which.view > self.max_view.0 {
             self.max_view = (qc.data.for_which.view, qc.data.clone());
         }
+
+        // TODO: don't do this _every_ time a qc is formed,
+        //       batch up the changes and do some more efficient
+        //       checking when we next need the tips? (isn't this right away?)
 
         let mut tips_to_yeet = BTreeSet::new();
         for tip in &self.tips {
@@ -103,16 +146,19 @@ impl MorpheusProcess {
             self.unfinalized_2qc.insert(qc.data.clone());
         }
 
-        // now find all the 2-qcs that this qc can finalize
-        // TODO: justify why this is correct
+        // now find all the waiting 2-qcs that this qc can finalize
+        // TODO: justify why this is correct according to the paper.
+
         let finalized_here = self
             .unfinalized_2qc
             .iter()
             .cloned()
             .filter(|unfinalized_2qc| self.observes(qc.data.clone(), unfinalized_2qc))
             .collect::<BTreeSet<_>>();
+
         self.unfinalized_2qc
             .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
+
         for finalized in finalized_here {
             self.unfinalized_lead_by_view
                 .entry(finalized.for_which.view)
@@ -127,30 +173,8 @@ impl MorpheusProcess {
             if qc.data.z == 1
                 && qc.data.for_which.type_ == BlockType::Lead
                 && qc.data.for_which.view == self.view_i
-                && !self.voted_i.contains(&(
-                    2,
-                    BlockType::Lead,
-                    qc.data.for_which.slot,
-                    qc.data.for_which.author.clone().expect("validated"),
-                ))
             {
-                self.voted_i.insert((
-                    2,
-                    BlockType::Lead,
-                    qc.data.for_which.slot,
-                    qc.data.for_which.author.clone().expect("validated"),
-                ));
-                to_send.push((
-                    Message::NewVote(Signed {
-                        data: VoteData {
-                            z: 2,
-                            for_which: qc.data.for_which.clone(),
-                        },
-                        author: self.id.clone(),
-                        signature: Signature {},
-                    }),
-                    None,
-                ));
+                self.try_vote(2, &qc.data.for_which, None, to_send);
             }
         }
 
@@ -169,34 +193,19 @@ impl MorpheusProcess {
                 .or_default()
                 .is_empty()
             && qc.data.for_which.type_ == BlockType::Tr
-            && !self.voted_i.contains(&(
-                2,
-                BlockType::Tr,
-                qc.data.for_which.slot,
-                qc.data.for_which.author.clone().expect("validated"),
-            ))
             && self.max_height.0 <= qc.data.for_which.height
         {
-            self.phase_i.insert(self.view_i, Phase::Low);
-            self.voted_i.insert((
-                2,
-                BlockType::Tr,
-                qc.data.for_which.slot,
-                qc.data.for_which.author.clone().expect("validated"),
-            ));
-            to_send.push((
-                Message::NewVote(Signed {
-                    data: VoteData {
-                        z: 2,
-                        for_which: qc.data.for_which.clone(),
-                    },
-                    author: self.id.clone(),
-                    signature: Signature {},
-                }),
-                None,
-            ));
+            if self.try_vote(2, &qc.data.for_which, None, to_send) {
+                crate::tracing_setup::protocol_transition(
+                    &self.id,
+                    "throughput phase",
+                    &Phase::High,
+                    &Phase::Low,
+                    Some("voted for a transaction block"),
+                );
+                self.phase_i.insert(self.view_i, Phase::Low);
+            }
         }
-        {}
     }
 
     /// Records a new block in this process's state

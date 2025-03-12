@@ -35,17 +35,15 @@
 ///
 /// See `pseudocode.txt` for the original algorithm description from the paper.
 
-mod block_production;
 mod types;
-mod state_tracking;
 mod process;
+mod invariants;
+mod state_tracking;
+mod block_production;
+
 pub mod mock_harness;
 pub mod debug_impls;
 pub mod tracing_setup;
-
-// Only include hades module when building with visualization feature
-#[cfg(feature = "visualization")]
-pub mod hades;
 
 pub use types::*;
 pub use process::*;

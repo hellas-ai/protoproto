@@ -19,8 +19,8 @@ pub struct MockHarness {
     pub processes: BTreeMap<Identity, MorpheusProcess>,
 
     /// Messages that are waiting to be delivered
-    /// Each message is paired with its destination (None means broadcast)
-    pub pending_messages: VecDeque<(Message, Option<Identity>)>,
+    /// Each message is paired with its sender and destination (None means broadcast)
+    pub pending_messages: VecDeque<(Message, Identity, Option<Identity>)>,
 
     /// Time increment to use when advancing time
     pub time_step: u128,
@@ -50,13 +50,13 @@ impl MockHarness {
         let mut to_send = Vec::new();
         // Process all the messages from last round
         while !self.pending_messages.is_empty() {
-            let (message, dest) = self.pending_messages.pop_front().unwrap();
+            let (message, sender, dest) = self.pending_messages.pop_front().unwrap();
 
             match dest {
                 Some(id) => {
                     // Deliver to specific node
                     if let Some(process) = self.processes.get_mut(&id) {
-                        let result = process.process_message(message, &mut to_send);
+                        let result = process.process_message(message, sender.clone(), &mut to_send);
                         let violations = process.check_invariants();
                         assert!(
                             violations.is_empty(),
@@ -74,7 +74,8 @@ impl MockHarness {
                     // Broadcast to all nodes
                     for (_, process) in self.processes.iter_mut() {
                         let mut to_send = Vec::new();
-                        let result = process.process_message(message.clone(), &mut to_send);
+                        let result =
+                            process.process_message(message.clone(), sender.clone(), &mut to_send);
                         let violations = process.check_invariants();
                         assert!(
                             violations.is_empty(),
@@ -89,8 +90,13 @@ impl MockHarness {
                     }
                 }
             }
+
+            self.pending_messages.extend(
+                to_send
+                    .drain(..)
+                    .map(|(msg, dest)| (msg, sender.clone(), dest)),
+            );
         }
-        self.pending_messages.extend(to_send);
 
         made_progress
     }
@@ -107,8 +113,9 @@ impl MockHarness {
             if !to_send.is_empty() {
                 made_progress = true;
                 // Add any new messages to pending
-                for msg in to_send {
-                    self.pending_messages.push_back(msg);
+                for (msg, dest) in to_send {
+                    self.pending_messages
+                        .push_back((msg, process.id.clone(), dest));
                 }
             }
         }
@@ -155,7 +162,13 @@ impl MockHarness {
     }
 
     /// Add a message to the pending queue
-    pub fn enqueue_message(&mut self, message: Message, destination: Option<Identity>) {
-        self.pending_messages.push_back((message, destination));
+    pub fn enqueue_message(
+        &mut self,
+        message: Message,
+        sender: Identity,
+        destination: Option<Identity>,
+    ) {
+        self.pending_messages
+            .push_back((message, sender, destination));
     }
 }

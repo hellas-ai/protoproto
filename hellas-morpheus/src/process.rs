@@ -97,6 +97,9 @@ pub struct MorpheusProcess {
     /// where q' is a maximal amongst 1-QCs seen by p_i"
     pub max_1qc: ThreshSigned<VoteData>,
 
+    /// Stores all 1-QCs seen by this process
+    pub all_1qc: BTreeSet<ThreshSigned<VoteData>>,
+
     /// Stores the current tips of the block DAG
     /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
     pub tips: Vec<VoteData>,
@@ -256,6 +259,7 @@ impl MorpheusProcess {
             max_view: (ViewNum(-1), genesis_qc.data.clone()),
             max_height: (0, GEN_BLOCK_KEY),
             max_1qc: genesis_qc.clone(),
+            all_1qc: BTreeSet::new(),
             tips: vec![genesis_qc.data.clone()],
             blocks: {
                 let mut map = BTreeMap::new();
@@ -436,14 +440,19 @@ impl MorpheusProcess {
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
         // Record message receipt for visualization
-        crate::tracing_setup::message_received(&self.id, &sender, "process_message", &message);
+        crate::tracing_setup::message_received(
+            &self.id,
+            &sender,
+            "process_message",
+            format_message(&message, true),
+        );
 
         // Check if we've seen this message before (duplicate detection)
         if cfg!(debug_assertions) {
             if self.received_messages.contains(&message) {
                 tracing::debug!(
                     process_id = ?self.id,
-                    message = ?message,
+                    message = format_message(&message, true),
                     "Ignoring duplicate message"
                 );
                 return false;
@@ -463,30 +472,12 @@ impl MorpheusProcess {
                     );
                     return false;
                 }
-                if !self.voted_i.contains(&(
+                self.try_vote(
                     0,
-                    block.data.key.type_,
-                    block.data.key.slot,
-                    block.data.key.author.clone().expect("validated"),
-                )) {
-                    self.voted_i.insert((
-                        0,
-                        block.data.key.type_,
-                        block.data.key.slot,
-                        block.data.key.author.clone().expect("validated"),
-                    ));
-                    to_send.push((
-                        Message::NewVote(Signed {
-                            data: VoteData {
-                                z: 0,
-                                for_which: block.data.key.clone(),
-                            },
-                            author: self.id.clone(),
-                            signature: Signature {},
-                        }),
-                        Some(block.data.key.author.clone().expect("validated")),
-                    ));
-                }
+                    &block.data.key,
+                    Some(block.data.key.author.clone().expect("validated")),
+                    to_send,
+                );
                 tracing::debug!(
                     process_id = ?self.id,
                     block_key = ?block.data.key,
@@ -497,32 +488,9 @@ impl MorpheusProcess {
                 self.record_block(block.clone(), to_send);
                 if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
                     // If ∃𝑏 ∈𝑀𝑖 with 𝑏.type= lead, 𝑏.view= view𝑖 , voted𝑖 (1,lead,𝑏.slot,𝑏.auth)= 0 then:
-                    if block.data.key.type_ == BlockType::Lead
-                        && block.data.key.view == self.view_i
-                        && !self.voted_i.contains(&(
-                            1,
-                            BlockType::Lead,
-                            block.data.key.slot,
-                            block.data.key.author.clone().expect("validated"),
-                        ))
+                    if block.data.key.type_ == BlockType::Lead && block.data.key.view == self.view_i
                     {
-                        self.voted_i.insert((
-                            1,
-                            BlockType::Lead,
-                            block.data.key.slot,
-                            block.data.key.author.clone().expect("validated"),
-                        ));
-                        to_send.push((
-                            Message::NewVote(Signed {
-                                data: VoteData {
-                                    z: 1,
-                                    for_which: block.data.key.clone(),
-                                },
-                                author: self.id.clone(),
-                                signature: Signature {},
-                            }),
-                            None,
-                        ));
+                        self.try_vote(1, &block.data.key, None, to_send);
                     }
                 }
                 if block.data.key.type_ == BlockType::Tr
@@ -539,36 +507,15 @@ impl MorpheusProcess {
                         .is_empty()
                     && self.tips.len() == 1
                     && self.tips[0].for_which == block.data.key
-                    && self
+                    && self // FIXME: compare only against max_1qc? keep a tips of 1-QCs?
                         .qcs
                         .values()
                         .filter(|qc| qc.data.z == 1)
                         .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
-                    && !self.voted_i.contains(&(
-                        1,
-                        BlockType::Tr,
-                        block.data.key.slot,
-                        block.data.key.author.clone().expect("validated"),
-                    ))
                 {
-                    self.phase_i.insert(self.view_i, Phase::Low);
-                    self.voted_i.insert((
-                        1,
-                        BlockType::Tr,
-                        block.data.key.slot,
-                        block.data.key.author.clone().expect("validated"),
-                    ));
-                    to_send.push((
-                        Message::NewVote(Signed {
-                            data: VoteData {
-                                z: 1,
-                                for_which: block.data.key.clone(),
-                            },
-                            author: self.id.clone(),
-                            signature: Signature {},
-                        }),
-                        None,
-                    ));
+                    if self.try_vote(1, &block.data.key, None, to_send) {
+                        self.phase_i.insert(self.view_i, Phase::Low);
+                    }
                 }
                 if block.data.key.type_ == BlockType::Lead {
                     self.contains_lead_by_view.insert(block.data.key.view, true);
@@ -582,31 +529,7 @@ impl MorpheusProcess {
                 if !vote_data.is_valid() {
                     return false;
                 }
-                match self.vote_tracker.record_vote(vote_data.clone()) {
-                    Ok(num_votes) => {
-                        if num_votes == self.n - self.f {
-                            let quorum_formed = ThreshSigned {
-                                data: vote_data.data.clone(),
-                                signature: ThreshSignature {},
-                            };
-                            if vote_data.data.z == 0
-                                && vote_data.data.for_which.author.as_ref() == Some(&self.id)
-                                && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
-                            {
-                                self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
-                                to_send.push((Message::QC(quorum_formed.clone()), None));
-                            }
-                            self.record_qc(
-                                ThreshSigned {
-                                    data: vote_data.data,
-                                    signature: ThreshSignature {},
-                                },
-                                to_send,
-                            );
-                        }
-                    }
-                    Err(Duplicate) => return false,
-                }
+                self.record_vote(&vote_data, to_send);
             }
             Message::QC(qc) => {
                 self.record_qc(qc, to_send);
@@ -752,327 +675,35 @@ impl MorpheusProcess {
         }
     }
 
-    /// Checks key protocol invariants and returns a list of invariant violations
-    ///
-    /// This method is intended for testing purposes to ensure protocol invariants
-    /// are maintained throughout execution.
-    pub fn check_invariants(&self) -> Vec<String> {
-        let mut violations = Vec::new();
+    pub fn try_vote(
+        &mut self,
+        z: u8,
+        block: &BlockKey,
+        target: Option<Identity>,
+        to_send: &mut Vec<(Message, Option<Identity>)>,
+    ) -> bool {
+        let author = block.author.clone().expect("validated");
 
-        // Check view and phase consistency
-        if !self.phase_i.contains_key(&self.view_i) {
-            violations.push(format!("Current view {} has no phase entry", self.view_i.0));
+        if !self
+            .voted_i
+            .contains(&(z, block.type_, block.slot, author.clone()))
+        {
+            self.voted_i
+                .insert((z, block.type_, block.slot, author.clone()));
+
+            let voted = Signed {
+                data: VoteData {
+                    z,
+                    for_which: block.clone(),
+                },
+                author: self.id.clone(),
+                signature: Signature {},
+            };
+            self.record_vote(&voted, to_send);
+            to_send.push((Message::NewVote(voted), target));
+            true
+        } else {
+            false
         }
-
-        // Check time consistency
-        if self.view_entry_time > self.current_time {
-            violations.push(format!(
-                "View entry time {} is after current time {}",
-                self.view_entry_time, self.current_time
-            ));
-        }
-
-        // Reconstruct Q_i - the set of QCs
-        // According to pseudocode: "Q_i stores at most one z-QC for each block"
-        let q_i_qcs: BTreeSet<&VoteData> = self.qcs.keys().collect();
-
-        // Check block DAG consistency
-        for (key, block) in &self.blocks {
-            // Check that block key matches the block's actual key
-            if &block.data.key != key {
-                violations.push(format!(
-                    "Block key mismatch: index key {:?} doesn't match block key {:?}",
-                    format_block_key(key),
-                    format_block_key(&block.data.key)
-                ));
-            }
-
-            // Check that each block is correctly indexed in block_pointed_by
-            for qc in &block.data.prev {
-                let pointed_block_key = &qc.data.for_which;
-                if let Some(pointed_blocks) = self.block_pointed_by.get(pointed_block_key) {
-                    if !pointed_blocks.contains(key) {
-                        violations.push(format!(
-                            "Block {:?} points to {:?} but not reflected in block_pointed_by",
-                            format_block_key(key),
-                            format_block_key(pointed_block_key)
-                        ));
-                    }
-                } else {
-                    violations.push(format!(
-                        "Block {:?} points to {:?} which has no block_pointed_by entry",
-                        format_block_key(key),
-                        format_block_key(pointed_block_key)
-                    ));
-                }
-            }
-        }
-
-        // Check block_pointed_by consistency
-        for (key, pointing_blocks) in &self.block_pointed_by {
-            // Verify the key exists in blocks
-            if !self.blocks.contains_key(key) && *key != GEN_BLOCK_KEY {
-                violations.push(format!(
-                    "block_pointed_by contains key {:?} but no such block exists",
-                    format_block_key(key)
-                ));
-            }
-
-            // Verify that each pointing block actually points to this block
-            for pointing_key in pointing_blocks {
-                if let Some(pointing_block) = self.blocks.get(pointing_key) {
-                    let points_to_key = pointing_block
-                        .data
-                        .prev
-                        .iter()
-                        .any(|qc| &qc.data.for_which == key);
-
-                    if !points_to_key {
-                        violations.push(format!(
-                            "Block {:?} in block_pointed_by for {:?} but doesn't actually point to it",
-                            pointing_key, key
-                        ));
-                    }
-                } else {
-                    violations.push(format!(
-                        "block_pointed_by for {:?} contains non-existent block {:?}",
-                        format_block_key(key),
-                        format_block_key(pointing_key)
-                    ));
-                }
-            }
-        }
-
-        // Check QC consistency
-        for (vote_data, qc) in &self.qcs {
-            // Check that QC data matches index
-            if &qc.data != vote_data {
-                violations.push(format!(
-                    "QC data mismatch: index data {:?} doesn't match QC data {:?}",
-                    format_vote_data(vote_data, false),
-                    format_vote_data(&qc.data, false)
-                ));
-            }
-
-            // Check that QC is correctly indexed in qc_index
-            let index_key = (
-                vote_data.for_which.type_,
-                vote_data
-                    .for_which
-                    .author
-                    .clone()
-                    .unwrap_or(Identity(u64::MAX)),
-                vote_data.for_which.slot,
-            );
-            if let Some(indexed_qc) = self.qc_index.get(&index_key) {
-                if &indexed_qc.data != vote_data {
-                    violations.push(format!(
-                        "QC index mismatch: qc_index data {:?} doesn't match QC data {:?}",
-                        format_vote_data(&indexed_qc.data, false),
-                        format_vote_data(vote_data, false)
-                    ));
-                }
-            } else {
-                violations.push(format!(
-                    "QC {:?} not found in qc_index:\n{:?}",
-                    vote_data, self.qc_index
-                ));
-            }
-
-            // Check that QC is correctly indexed in qc_by_view
-            let view_key = (
-                vote_data.for_which.type_,
-                vote_data
-                    .for_which
-                    .author
-                    .clone()
-                    .unwrap_or(Identity(u64::MAX)),
-                vote_data.for_which.view,
-            );
-            if let Some(view_qcs) = self.qc_by_view.get(&view_key) {
-                if !view_qcs.iter().any(|q| &q.data == vote_data) {
-                    violations.push(format!(
-                        "QC {:?} not found in qc_by_view for key {:?}",
-                        format_vote_data(vote_data, false),
-                        &view_key
-                    ));
-                }
-            } else {
-                violations.push(format!("QC {:?} not found in qc_by_view", vote_data));
-            }
-        }
-
-        // Check tips consistency using self.observes() relation
-        // "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
-        let mut computed_tips = Vec::new();
-        for qc_data in q_i_qcs.iter() {
-            let is_tip = !q_i_qcs.iter().any(|qc_data2| {
-                // Is there any QC that observes this one and is not the same?
-                qc_data != qc_data2
-                    && self.observes((*qc_data2).clone(), qc_data)
-                    && !self.observes((*qc_data).clone(), qc_data2)
-            });
-
-            if is_tip {
-                computed_tips.push((*qc_data).clone());
-            }
-        }
-
-        // Check if our computed tips match the actual tips
-        let actual_tips_set: BTreeSet<VoteData> = self.tips.iter().cloned().collect();
-        let computed_tips_set: BTreeSet<VoteData> = computed_tips.into_iter().collect();
-
-        if actual_tips_set != computed_tips_set {
-            // Find elements in computed_tips but not in actual_tips
-            let missing_tips: Vec<_> = computed_tips_set.difference(&actual_tips_set).collect();
-
-            // Find elements in actual_tips but not in computed_tips
-            let extra_tips: Vec<_> = actual_tips_set.difference(&computed_tips_set).collect();
-
-            if !missing_tips.is_empty() {
-                violations.push(format!(
-                    "Tips is missing QCs that should be tips: {:?}",
-                    missing_tips
-                ));
-            }
-
-            if !extra_tips.is_empty() {
-                violations.push(format!(
-                    "Tips contains QCs that should not be tips: {:?}",
-                    extra_tips
-                ));
-            }
-        }
-
-        // Check finalization according to pseudocode definition:
-        // "Process p_i regards q ∈ Q_i (and q.b) as final if there exists q' ∈ Q_i such
-        // that q' ⪰ q and q is a 2-QC (for any block)."
-        for (vote_data, _) in &self.qcs {
-            // Only check 2-QCs for finalization
-            if vote_data.z == 2 {
-                let block_key = &vote_data.for_which;
-
-                // Check if any QC observes this 2-QC
-                let observed_by_any = self
-                    .qcs
-                    .keys()
-                    .any(|q_data| q_data != vote_data && self.observes(q_data.clone(), vote_data));
-
-                // According to pseudocode, this 2-QC should be final if observed by any other QC
-                let should_be_final = observed_by_any;
-
-                // Check if it's actually marked as final
-                let is_marked_final = self.finalized.get(block_key).cloned().unwrap_or(false);
-
-                if should_be_final && !is_marked_final {
-                    violations.push(format!(
-                        "Block {:?} with 2-QC is observed by another QC but not marked as finalized",
-                        format_block_key(block_key)
-                    ));
-                }
-
-                // Also check the opposite - blocks marked as final should satisfy the definition
-                if is_marked_final && !should_be_final && !observed_by_any {
-                    violations.push(format!(
-                        "Block {:?} is marked as finalized but its 2-QC is not observed by any other QC",
-                        format_block_key(block_key)
-                    ));
-                }
-            }
-        }
-
-        // Check max_height consistency
-        let max_height = self.max_height.0;
-        let max_height_key = &self.max_height.1;
-        let actual_max_height = self.blocks.keys().map(|k| k.height).max().unwrap_or(0);
-
-        if max_height != actual_max_height {
-            violations.push(format!(
-                "max_height ({}) does not match actual max height ({})",
-                max_height, actual_max_height
-            ));
-        }
-
-        if max_height > 0 && !self.blocks.contains_key(max_height_key) {
-            violations.push(format!(
-                "max_height_key {:?} does not exist in blocks",
-                format_block_key(max_height_key)
-            ));
-        }
-
-        // Check max_1qc maximality according to compare_qc
-        // "max_1qc is a maximal amongst 1-QCs seen by p_i"
-        if self.max_1qc.data.z != 1 {
-            violations.push(format!(
-                "max_1qc has z = {} instead of 1",
-                self.max_1qc.data.z
-            ));
-        }
-
-        // Check if max_1qc is actually maximal among all 1-QCs
-        for (vote_data, qc) in &self.qcs {
-            if vote_data.z == 1 {
-                let comparison = vote_data.compare_qc(&self.max_1qc.data);
-                if comparison == std::cmp::Ordering::Greater {
-                    violations.push(format!(
-                        "Found 1-QC {:?} that is greater than max_1qc {:?} according to compare_qc",
-                        format_vote_data(vote_data, false),
-                        format_vote_data(&self.max_1qc.data, false)
-                    ));
-                }
-            }
-        }
-
-        // Check finalization consistency
-        for (key, is_finalized) in &self.finalized {
-            if *is_finalized {
-                // If finalized, it shouldn't be in unfinalized
-                if self.unfinalized.contains_key(key) {
-                    violations.push(format!(
-                        "Block {:?} is marked as finalized but is also in unfinalized",
-                        key
-                    ));
-                }
-            }
-        }
-
-        // Check unfinalized_2qc consistency
-        for vote_data in &self.unfinalized_2qc {
-            if vote_data.z != 2 {
-                violations.push(format!(
-                    "VoteData {:?} in unfinalized_2qc has z = {} instead of 2",
-                    format_vote_data(vote_data, false),
-                    vote_data.z
-                ));
-            }
-
-            // Should be in qcs
-            if !self.qcs.contains_key(vote_data) {
-                violations.push(format!(
-                    "VoteData {:?} in unfinalized_2qc not found in qcs",
-                    format_vote_data(vote_data, false)
-                ));
-            }
-
-            // The block should be unfinalized
-            let block_key = &vote_data.for_which;
-            if !self.unfinalized.contains_key(block_key) {
-                violations.push(format!(
-                    "Block {:?} for VoteData in unfinalized_2qc not found in unfinalized",
-                    format_block_key(block_key)
-                ));
-            }
-        }
-
-        // Check view leader consistency
-        let leader = self.lead(self.view_i);
-        if !self.verify_leader(leader.clone(), self.view_i) {
-            violations.push(format!(
-                "Current leader {} for view {} fails verification",
-                leader.0, self.view_i.0
-            ));
-        }
-
-        violations
     }
 }

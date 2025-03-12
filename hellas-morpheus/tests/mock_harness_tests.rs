@@ -104,13 +104,13 @@ fn test_mock_harness_enqueue_message() {
     });
     
     // Enqueue a message for a specific destination
-    harness.enqueue_message(dummy_message.clone(), Some(Identity(2)));
+    harness.enqueue_message(dummy_message.clone(),  Identity(1), Some(Identity(2)));
     
     // Check that the message was enqueued
     assert_eq!(harness.pending_messages.len(), 1);
     
     // Enqueue a broadcast message
-    harness.enqueue_message(dummy_message, None);
+    harness.enqueue_message(dummy_message, Identity(1), None);
     
     // Check that the message was enqueued
     assert_eq!(harness.pending_messages.len(), 2);

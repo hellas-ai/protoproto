@@ -54,7 +54,7 @@ fn test_basic_process_interaction() {
     });
     
     // Enqueue the message for process2
-    harness.enqueue_message(end_view_message, Some(Identity(2)));
+    harness.enqueue_message(end_view_message, Identity(1), Some(Identity(2)));
     
     // Process a round
     let made_progress = harness.process_round();
@@ -109,7 +109,7 @@ fn test_broadcast_message() {
     });
     
     // Broadcast the message (destination = None)
-    harness.enqueue_message(end_view_message, None);
+    harness.enqueue_message(end_view_message,  Identity(1), None);
     
     // In the case of a broadcast, the message should be delivered to all processes
     // In our mock harness implementation, the broadcast is done during process_round

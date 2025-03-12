@@ -34,8 +34,8 @@ fn test_multiple_message_processing() {
     });
     
     // Enqueue the messages for specific destinations
-    harness.enqueue_message(message1, Some(Identity(2)));
-    harness.enqueue_message(message2, Some(Identity(3)));
+    harness.enqueue_message(message1, Identity(1), Some(Identity(2)));
+    harness.enqueue_message(message2, Identity(2), Some(Identity(3)));
     
     // Initial queue length
     assert_eq!(harness.pending_messages.len(), 2);
@@ -97,7 +97,7 @@ fn test_complex_simulation() {
     });
     
     // Broadcast the message
-    harness.enqueue_message(qc_message, None);
+    harness.enqueue_message(qc_message, Identity(1),  None);
     
     // Run for several steps
     harness.run(5);
@@ -134,7 +134,7 @@ fn test_message_enqueue_and_processing() {
     let vote_message = Message::NewVote(signed_vote);
     
     // Enqueue the message for a specific destination
-    harness.enqueue_message(vote_message, Some(Identity(2)));
+    harness.enqueue_message(vote_message, Identity(1), Some(Identity(2)));
     
     // Check initial queue length
     assert_eq!(harness.pending_messages.len(), 1);
@@ -169,7 +169,7 @@ fn test_step_sequence() {
         signature: Signature {},
     });
     
-    harness.enqueue_message(message, Some(Identity(2)));
+    harness.enqueue_message(message, Identity(1), Some(Identity(2)));
     
     // Run another step
     harness.step();
