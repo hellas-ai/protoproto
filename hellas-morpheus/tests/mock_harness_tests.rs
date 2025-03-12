@@ -122,13 +122,13 @@ fn test_mock_harness_enqueue_message() {
 
 
 #[test_log::test]
-fn test_check_invariants() {
+fn test_basic_txgen() {
     assert!(cfg!(debug_assertions));
 
     // Create a test process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
     let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(2), 3, 1);
+    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
     
     // A freshly created process should have no invariant violations
     let violations = process.check_invariants();
@@ -148,4 +148,179 @@ fn test_check_invariants() {
     
     // Let the system run for a while.
     harness.run(60);
+
+    // 51 blocks = 30 blocks from p3 + 20 blocks from p2 + 1 genesis block?
+    // where are the leader blocks?
+    assert_eq!(harness.processes.get(&Identity(2)).unwrap().blocks.len(), 51);
+} 
+
+#[test_log::test]
+fn test_basic_integration() {
+    // Create 3 test processes
+    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
+    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
+    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
+
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process1, process2, process3], 50);
+
+    // Initial state
+    assert_eq!(harness.time, 0);
+    assert_eq!(harness.processes.len(), 3);
+
+    // Create a simple EndView message to broadcast
+    let end_view_message = Message::EndView(Arc::new(Signed {
+        data: ViewNum(0),
+        author: Identity(1),
+        signature: Signature {},
+    }));
+
+    // Broadcast the message
+    harness.enqueue_message(end_view_message, Identity(1), None);
+
+    // Run for multiple steps to simulate system behavior
+    harness.run(10);
+
+    // After 10 steps, time should have advanced
+    assert_eq!(harness.time, 500);
+
+    // Each process should have its time updated correctly
+    for (_, process) in harness.processes.iter() {
+        assert_eq!(process.current_time, 500);
+    }
+}
+
+
+#[test_log::test]
+fn test_directed_message_flow() {
+    // Create 3 test processes
+    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
+    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
+    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
+
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process1, process2, process3], 50);
+
+    // Create messages flowing from process1 to process2
+    let message1 = Message::EndView(Arc::new(Signed {
+        data: ViewNum(0),
+        author: Identity(1),
+        signature: Signature {},
+    }));
+
+    // Create messages flowing from process2 to process3
+    let message2 = Message::EndView(Arc::new(Signed {
+        data: ViewNum(1),
+        author: Identity(2),
+        signature: Signature {},
+    }));
+
+    // Enqueue the directed messages
+    harness.enqueue_message(message1, Identity(1), Some(Identity(2)));
+    harness.enqueue_message(message2, Identity(2), Some(Identity(3)));
+
+    // Step once to process the messages
+    harness.step();
+
+    // Time should have advanced
+    assert_eq!(harness.time, 50);
+
+    // All processes should have their time updated
+    for (_, process) in harness.processes.iter() {
+        assert_eq!(process.current_time, 50);
+    }
+}
+
+#[test_log::test]
+fn test_process_round_no_messages() {
+    // Create a process
+    let process = MorpheusProcess::new(Identity(1), 3, 1);
+    
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process], 100);
+    
+    // Initial state - no pending messages
+    assert_eq!(harness.pending_messages.len(), 0);
+    
+    // Process a round should not make progress without messages
+    let made_progress = harness.process_round();
+    assert_eq!(made_progress, false);
+}
+
+
+#[test_log::test]
+fn test_check_all_timeouts() {
+    // Create a process
+    let process = MorpheusProcess::new(Identity(1), 3, 1);
+    
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process], 100);
+    
+    // Check timeouts
+    let made_progress = harness.check_all_timeouts();
+    
+    // There should be nothing to do
+    assert_eq!(made_progress, false);
+}
+
+
+#[test_log::test]
+fn test_basic_process_interaction() {
+    // Create test processes
+    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
+    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
+    
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process1, process2], 100);
+    
+    // Create a simple EndView message to trigger some interaction
+    let end_view_message = Message::EndView(Arc::new(hellas_morpheus::Signed {
+        data: ViewNum(0), 
+        author: Identity(1),
+        signature: Signature {},
+    }));
+    
+    // Enqueue the message for process2
+    harness.enqueue_message(end_view_message, Identity(1), Some(Identity(2)));
+    
+    // Process a round
+    let made_progress = harness.process_round();
+    
+    assert_eq!(made_progress, true);
+
+    // Message queue should be empty after processing
+    assert_eq!(harness.pending_messages.len(), 0);
+}
+
+
+#[test_log::test]
+fn test_broadcast_message() {
+    // Create test processes
+    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
+    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
+    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
+    
+    // Create a harness
+    let mut harness = MockHarness::new(vec![process1, process2, process3], 100);
+    
+    // Create a simple EndView message to broadcast
+    let end_view_message = Message::EndView(Arc::new(hellas_morpheus::Signed {
+        data: ViewNum(0),
+        author: Identity(1),
+        signature: Signature {},
+    }));
+    
+    // Broadcast the message (destination = None)
+    harness.enqueue_message(end_view_message,  Identity(1), None);
+    
+    // In the case of a broadcast, the message should be delivered to all processes
+    // In our mock harness implementation, the broadcast is done during process_round
+    // and the message is consumed only once, so pending_messages should contain just one item
+    assert_eq!(harness.pending_messages.len(), 1);
+    
+    // Process the round to broadcast the message
+    harness.process_round();
+    
+    // After processing, the message queue should be empty
+    assert_eq!(harness.pending_messages.len(), 0);
 } 

@@ -7,7 +7,6 @@ use std::{
 use crate::*;
 
 impl MorpheusProcess {
-    #[tracing::instrument(skip(self, to_send))]
     pub fn try_vote(
         &mut self,
         z: u8,
@@ -41,7 +40,6 @@ impl MorpheusProcess {
     }
 
     /// Returns false if the vote is a duplicate (sender already voted there)
-    #[tracing::instrument(skip(self, to_send))]
     pub fn record_vote(
         &mut self,
         vote_data: &Arc<Signed<VoteData>>,
@@ -86,7 +84,6 @@ impl MorpheusProcess {
     ///
     /// It's not clear that this is correct, and it may even be slower than a
     /// more naive approach if the set sizes were kept small.
-    #[tracing::instrument(skip(self, to_send))]
     pub fn record_qc(
         &mut self,
         qc: &Arc<ThreshSigned<VoteData>>,
@@ -246,7 +243,6 @@ impl MorpheusProcess {
     /// updated and specifies the set of all received messages."
     ///
     /// It will also record any QCs that are used as pointers in the block.
-    #[tracing::instrument(skip(self, to_send))]
     pub fn record_block(
         &mut self,
         block: &Arc<Signed<Block>>,

@@ -62,7 +62,7 @@ impl<T> Signed<T> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct BlockKey {
     pub type_: BlockType,
     pub view: ViewNum,
@@ -70,6 +70,12 @@ pub struct BlockKey {
     pub author: Option<Identity>, // TODO: refactor genesis handling to make this mandatory
     pub slot: SlotNum,
     pub hash: Option<BlockHash>,
+}
+
+impl std::fmt::Debug for BlockKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format::format_block_key(self))
+    }
 }
 
 pub const GEN_BLOCK_KEY: BlockKey = BlockKey {
@@ -81,10 +87,16 @@ pub const GEN_BLOCK_KEY: BlockKey = BlockKey {
     hash: None,
 };
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct VoteData {
     pub z: u8,
     pub for_which: BlockKey,
+}
+
+impl std::fmt::Debug for VoteData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", format::format_vote_data(self, false))
+    }
 }
 
 impl VoteData {

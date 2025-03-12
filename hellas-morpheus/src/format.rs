@@ -71,7 +71,7 @@ pub fn format_vote_data(vote_data: &VoteData, verbose: bool) -> String {
             format_block_key(&vote_data.for_which)
         )
     } else {
-        format!("{}z-{}", vote_data.z, format_block_key(&vote_data.for_which))
+        format!("{}-{}", vote_data.z, format_block_key(&vote_data.for_which))
     }
 }
 

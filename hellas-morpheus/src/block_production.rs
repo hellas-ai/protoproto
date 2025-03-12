@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::*;
 
 impl MorpheusProcess {
-    #[tracing::instrument(skip(self, to_send))]
     pub fn try_produce_blocks(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
         if self.payload_ready() {
             self.make_tr_block(to_send);

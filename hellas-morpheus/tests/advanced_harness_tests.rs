@@ -16,7 +16,6 @@ fn create_test_setup() -> MockHarness {
     MockHarness::new(vec![process1, process2, process3], 100)
 }
 
-
 #[test_log::test]
 fn test_multiple_message_processing() {
     let mut harness = create_test_setup();
@@ -46,8 +45,34 @@ fn test_multiple_message_processing() {
 
     // Queue should be empty after processing
     assert_eq!(harness.pending_messages.len(), 0);
+    assert_eq!(
+        harness
+            .processes
+            .get(&Identity(1))
+            .unwrap()
+            .received_messages
+            .len(),
+        2
+    );
+    assert_eq!(
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .received_messages
+            .len(),
+        3
+    );
+    assert_eq!(
+        harness
+            .processes
+            .get(&Identity(3))
+            .unwrap()
+            .received_messages
+            .len(),
+        3
+    );
 }
-
 
 #[test_log::test]
 fn test_time_advancement_affects_processes() {
@@ -70,7 +95,6 @@ fn test_time_advancement_affects_processes() {
         assert_eq!(process.current_time, 100);
     }
 }
-
 
 #[test_log::test]
 fn test_complex_simulation() {
@@ -108,7 +132,6 @@ fn test_complex_simulation() {
     // Check final state after simulation
     assert_eq!(harness.time, 500);
 }
-
 
 #[test_log::test]
 fn test_message_enqueue_and_processing() {
@@ -149,7 +172,6 @@ fn test_message_enqueue_and_processing() {
     // Queue should be empty after processing
     assert_eq!(harness.pending_messages.len(), 0);
 }
-
 
 #[test_log::test]
 fn test_step_sequence() {

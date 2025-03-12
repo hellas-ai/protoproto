@@ -310,7 +310,6 @@ impl MorpheusProcess {
         }
     }
 
-    #[tracing::instrument(skip(self, to_send), fields(process_id = ?self.id))]
     pub(crate) fn send_msg(
         &mut self,
         to_send: &mut Vec<(Message, Option<Identity>)>,
@@ -327,11 +326,11 @@ impl MorpheusProcess {
     }
 
     pub fn verify_leader(&self, author: Identity, view: ViewNum) -> bool {
-        author.0 as usize == (view.0 as usize % self.n)
+        author.0 as usize == 1 + (view.0 as usize % self.n)
     }
 
     pub fn lead(&self, view: ViewNum) -> Identity {
-        Identity(view.0 as u64 % self.n as u64)
+        Identity((view.0 as u64 % self.n as u64) + 1) // identities are 1-indexed... ok
     }
 
     #[tracing::instrument(skip(self, to_send), fields(process_id = ?self.id))]
@@ -359,7 +358,7 @@ impl MorpheusProcess {
         match message {
             Message::Block(block) => {
                 if let Err(error) = self.block_valid(&block) {
-                    tracing::warn!(
+                    tracing::error!(
                         process_id = ?self.id,
                         block = ?block.data.key,
                         error = ?error,

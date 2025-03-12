@@ -128,7 +128,7 @@ fn test_format_functions() {
 
     // Assert that our format functions work
     let vote_format = format_vote_data(&vote_data, false);
-    assert!(vote_format.contains("1z-"));
+    assert!(vote_format.contains("1-"));
     assert!(vote_format.contains("Tr["));
 
     let block_format = format_block(&block, false);
