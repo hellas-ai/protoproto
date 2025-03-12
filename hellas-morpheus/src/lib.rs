@@ -43,7 +43,7 @@ mod block_production;
 mod block_validation;
 
 pub mod mock_harness;
-pub mod debug_impls;
+pub mod format;
 pub mod tracing_setup;
 
 pub use types::*;

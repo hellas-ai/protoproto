@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
 
-use crate::debug_impls;
+use crate::format;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum BlockType {
@@ -132,7 +132,7 @@ pub struct Block {
 
 impl std::fmt::Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", debug_impls::format_block(self, true))
+        write!(f, "{}", format::format_block(self, true))
     }
 }
 
@@ -149,7 +149,7 @@ pub enum Message {
 
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", debug_impls::format_message(self, true))
+        write!(f, "{:?}", format::format_message(self, true))
     }
 }
 

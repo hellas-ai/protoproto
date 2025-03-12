@@ -1,5 +1,5 @@
 use hellas_morpheus::*;
-use hellas_morpheus::mock_harness::MockHarness;
+use hellas_morpheus::mock_harness::{MockHarness, TxGenPolicy};
 use std::sync::Arc;
 
 #[test]
@@ -56,9 +56,8 @@ fn test_mock_harness_step() {
     // Time should have advanced
     assert_eq!(harness.time, 100);
     
-    // The actual return value depends on implementation details we're not aware of
-    // In our tests we observed that the actual value is true, not false as we expected
-    assert_eq!(made_progress, true);
+    // There should be nothing to do
+    assert_eq!(made_progress, false);
 }
 
 #[test]
@@ -80,7 +79,7 @@ fn test_mock_harness_run() {
     
     // The actual return value depends on implementation details we're not aware of
     // In our tests we observed that the actual value is true, not false as we expected
-    assert_eq!(made_progress, true);
+    assert_eq!(made_progress, false);
 }
 
 #[test]
@@ -120,41 +119,25 @@ fn test_mock_harness_enqueue_message() {
 fn test_check_invariants() {
     // Create a test process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
+    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
+    let process3 = MorpheusProcess::new(Identity(2), 3, 1);
     
     // A freshly created process should have no invariant violations
     let violations = process.check_invariants();
     assert!(violations.is_empty(), "New process has invariant violations: {:?}", violations);
     
     // Create a harness
-    let mut harness = MockHarness::new(vec![process], 100);
+    let mut harness = MockHarness::new(vec![process, process2, process3], 100);
+
+    harness
+        .tx_gen_policy
+        .insert(Identity(2), TxGenPolicy::EveryNSteps { n: 3 });
+
+    harness
+        .tx_gen_policy
+        .insert(Identity(3), TxGenPolicy::EveryNSteps { n: 2 });
+
     
-    // Run for a few steps to let the system build up some state
-    harness.run(10);
-    
-    // Check that all processes maintain invariants
-    for (id, process) in &harness.processes {
-        let violations = process.check_invariants();
-        assert!(
-            violations.is_empty(),
-            "Process {} has invariant violations after simulation: {:?}",
-            id.0,
-            violations
-        );
-        
-        // Verify specific invariants are being checked:
-        
-        // 1. Check that tips are correctly identified based on observes relation
-        let tips_count = process.tips.len();
-        println!("Process {} has {} tips in its DAG", id.0, tips_count);
-        
-        // 2. Check that max_1qc is maximal according to compare_qc
-        let max_1qc = &process.max_1qc.data;
-        let is_maximal = process.qcs.keys().filter(|qc| qc.z == 1)
-            .all(|qc| qc.compare_qc(max_1qc) != std::cmp::Ordering::Greater);
-        assert!(is_maximal, "max_1qc is not maximal in process {}", id.0);
-        
-        // 3. Check finalization: 2-QCs observed by other QCs should be final
-        let finalized_count = process.finalized.values().filter(|&&is_final| is_final).count();
-        println!("Process {} has {} finalized blocks", id.0, finalized_count);
-    }
+    // Let the system run for a while, the harness checks invariants after each message.
+    harness.run(50);
 } 

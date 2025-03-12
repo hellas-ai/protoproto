@@ -6,7 +6,10 @@
 // At each step, we deliver messages that are ready to be delivered.
 // We process each message to completion, check timeouts, check block production eligibility, and finally advance the state of the simulation.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
+};
 
 use crate::*;
 
@@ -24,6 +27,18 @@ pub struct MockHarness {
 
     /// Time increment to use when advancing time
     pub time_step: u128,
+
+    pub steps: usize,
+
+    /// Policy for generating transactions
+    pub tx_gen_policy: BTreeMap<Identity, TxGenPolicy>,
+}
+
+pub enum TxGenPolicy {
+    EveryNSteps { n: usize },
+    OncePerView { prev_view: RefCell<Option<ViewNum>> },
+    Always,
+    Never,
 }
 
 impl MockHarness {
@@ -31,7 +46,8 @@ impl MockHarness {
     pub fn new(nodes: Vec<MorpheusProcess>, time_step: u128) -> Self {
         let mut processes = BTreeMap::new();
 
-        for node in nodes {
+        for mut node in nodes {
+            node.delta = time_step;
             let id = node.id.clone();
             processes.insert(id, node);
         }
@@ -41,6 +57,8 @@ impl MockHarness {
             processes,
             pending_messages: VecDeque::new(),
             time_step,
+            steps: 0,
+            tx_gen_policy: BTreeMap::new(),
         }
     }
 
@@ -108,7 +126,6 @@ impl MockHarness {
         for (_, process) in self.processes.iter_mut() {
             let mut to_send = Vec::new();
             process.check_timeouts(&mut to_send);
-            process.try_produce_blocks(&mut to_send);
 
             if !to_send.is_empty() {
                 made_progress = true;
@@ -140,13 +157,56 @@ impl MockHarness {
     pub fn step(&mut self) -> bool {
         let processed = self.process_round();
         let timeouts = self.check_all_timeouts();
+        let produced = self.produce_blocks();
 
         // Check if we made any progress
-        let made_progress = processed || timeouts;
+        let made_progress = processed || timeouts || produced;
 
         // Advance time regardless of progress
         self.advance_time();
 
+        self.steps += 1;
+
+        made_progress
+    }
+
+    /// Produce blocks for all nodes
+    pub fn produce_blocks(&mut self) -> bool {
+        let mut made_progress = false;
+        for (_, process) in self.processes.iter_mut() {
+            let mut to_send = Vec::new();
+            match self.tx_gen_policy.get(&process.id) {
+                Some(TxGenPolicy::EveryNSteps { n }) => {
+                    if self.steps % n == 0 {
+                        process
+                            .ready_transactions
+                            .push(Transaction::Opaque(vec![1, 2, 3, 4]));
+                    }
+                }
+                Some(TxGenPolicy::OncePerView { prev_view }) => {
+                    if process.view_i != prev_view.borrow().unwrap_or(ViewNum(-1)) {
+                        process
+                            .ready_transactions
+                            .push(Transaction::Opaque(vec![1, 2, 3, 4]));
+                        *prev_view.borrow_mut() = Some(process.view_i);
+                    }
+                }
+                Some(TxGenPolicy::Always) => {
+                    process
+                        .ready_transactions
+                        .push(Transaction::Opaque(vec![1, 2, 3, 4]));
+                }
+                None | Some(TxGenPolicy::Never) => {
+                    // Do nothing
+                }
+            }
+            process.try_produce_blocks(&mut to_send);
+            for (msg, dest) in to_send {
+                made_progress = true;
+                self.pending_messages
+                    .push_back((msg, process.id.clone(), dest));
+            }
+        }
         made_progress
     }
 

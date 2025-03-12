@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    debug_impls::{format_block_key, format_message, format_vote_data},
+    format::{format_block_key, format_message, format_vote_data},
     block_validation::BlockValidationError,
     *,
 };
@@ -155,6 +155,7 @@ pub struct MorpheusProcess {
 
     pub genesis: Arc<Block>,
     pub genesis_qc: Arc<ThreshSigned<VoteData>>,
+    pub ready_transactions: Vec<Transaction>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -309,6 +310,7 @@ impl MorpheusProcess {
 
             genesis: Arc::new(genesis_block.data.clone()),
             genesis_qc: genesis_qc.clone(),
+            ready_transactions: Vec::new(),
         }
     }
 

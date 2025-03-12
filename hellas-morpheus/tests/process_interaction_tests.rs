@@ -32,9 +32,8 @@ fn test_check_all_timeouts() {
     // Check timeouts
     let made_progress = harness.check_all_timeouts();
     
-    // Based on the actual behavior, it appears the implementation 
-    // does make progress on checking timeouts even in the initial state
-    assert_eq!(made_progress, true);
+    // There should be nothing to do
+    assert_eq!(made_progress, false);
 }
 
 #[test]
@@ -59,10 +58,8 @@ fn test_basic_process_interaction() {
     // Process a round
     let made_progress = harness.process_round();
     
-    // The process_message function in MorpheusProcess should return some indication
-    // of progress, but for the purpose of this test, we don't know if it will
-    // without more specific test data, so we don't assert on made_progress.
-    
+    assert_eq!(made_progress, true);
+
     // Message queue should be empty after processing
     assert_eq!(harness.pending_messages.len(), 0);
 }

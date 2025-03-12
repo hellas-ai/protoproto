@@ -79,7 +79,7 @@ fn test_format_functions() {
     ];
 
     // Import the formatting functions
-    use hellas_morpheus::debug_impls::*;
+    use hellas_morpheus::format::*;
 
     // Print everything with our custom formatters
     println!("\n==== Basic Types ====");

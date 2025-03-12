@@ -18,7 +18,7 @@ impl MorpheusProcess {
     }
 
     fn payload_ready(&self) -> bool {
-        let has_transactions = true;
+        let has_transactions = !self.ready_transactions.is_empty();
 
         if self.slot_i_tr > SlotNum(0) {
             let has_prev_qc = self.qc_by_slot.contains_key(&(
@@ -87,13 +87,12 @@ impl MorpheusProcess {
             hash: Some(BlockHash(self.slot_i_tr.0)),
         };
 
-        // Create block with sample transaction
         let block = Block {
             key: block_key.clone(),
             prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
             one: ThreshSigned::clone(&max_1qc),
             data: BlockData::Tr {
-                transactions: vec![Transaction::Opaque(vec![0, 1, 2])],
+                transactions: std::mem::take(&mut self.ready_transactions),
             },
         };
 
@@ -117,11 +116,8 @@ impl MorpheusProcess {
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
         crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
 
-        // Broadcast block to all processes
-        to_send.push((Message::Block(signed_block.clone()), None));
-
-        // Record block locally
         self.record_block(&signed_block, to_send);
+        to_send.push((Message::Block(signed_block.clone()), None));
     }
 
     // LeaderReady - Efficiently determines if leader is ready to produce a block
@@ -276,6 +272,7 @@ impl MorpheusProcess {
             signature: Signature {},
         });
 
+        self.record_block(&signed_block, to_send);
         to_send.push((Message::Block(signed_block), None));
 
         // 8. Update leader slot
