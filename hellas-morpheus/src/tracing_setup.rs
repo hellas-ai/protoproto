@@ -1,36 +1,4 @@
 use tracing::{debug, error, info};
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, Registry};
-
-#[cfg(target_arch = "wasm32")]
-use tracing_wasm;
-
-/// Initialize tracing infrastructure based on environment
-pub fn init_tracing() {
-    #[cfg(target_arch = "wasm32")]
-    {
-        // Set up WASM-specific tracing for browser integration
-        console_error_panic_hook::set_once();
-        tracing_wasm::set_as_global_default();
-        info!("Tracing initialized for WebAssembly target");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        // Set up non-WASM tracing (for tests and native running)
-        let env_filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("hellas_morpheus=debug"));
-
-        let subscriber = Registry::default()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer().with_target(true));
-
-        tracing::subscriber::set_global_default(subscriber)
-            .expect("Failed to set global default tracing subscriber");
-        
-        info!("Tracing initialized for native target");
-    }
-}
 
 /// Register a new Morpheus process with tracing
 pub fn register_process(id: &crate::Identity, n: usize, f: usize) {

@@ -1,19 +1,22 @@
-// Simulator that runs a mock network of nodes
+//! Simulator that runs a mock network of nodes
 //
-// Time is "logical", we don't actually wait for anything to happen
-// We call set_now to simulate the passage of time in single-step increments
+//! Time is "logical", we don't actually wait for anything to happen
+//! We call set_now to simulate the passage of time in single-step increments
 //
-// At each step, we deliver messages that are ready to be delivered.
-// We process each message to completion, check timeouts, check block production eligibility, and finally advance the state of the simulation.
+//! At each step, we deliver messages that are ready to be delivered.
+//! We process each message to completion, check timeouts, check block production eligibility, and finally advance the state of the simulation.
 
 use std::{
     cell::RefCell,
     collections::{BTreeMap, VecDeque},
 };
 
+use serde::{Serialize, Deserialize};
+
 use crate::*;
 
 /// A basic simulation harness for MorpheusProcess
+
 pub struct MockHarness {
     /// The current logical time of the simulation
     pub time: u128,
@@ -34,6 +37,9 @@ pub struct MockHarness {
     pub tx_gen_policy: BTreeMap<Identity, TxGenPolicy>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "webviz", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum TxGenPolicy {
     EveryNSteps { n: usize },
     OncePerView { prev_view: RefCell<Option<ViewNum>> },

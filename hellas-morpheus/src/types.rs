@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
-
 use crate::format;
 
+#[cfg(feature = "webviz")]
+use tsify_next::Tsify;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub enum BlockType {
     Genesis,
     Lead,
@@ -11,19 +14,25 @@ pub enum BlockType {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct ThreshSignature {}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct Signature {}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub enum Transaction {
     Opaque(Vec<u8>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct ViewNum(pub i64);
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct SlotNum(pub u64);
 impl SlotNum {
     pub fn is_pred(&self, other: SlotNum) -> bool {
@@ -32,12 +41,15 @@ impl SlotNum {
 }
 
 #[derive(PartialEq, Clone, PartialOrd, Eq, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct Identity(pub u64);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct BlockHash(pub u64);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct Signed<T> {
     pub data: T,
     pub author: Identity,
@@ -45,6 +57,7 @@ pub struct Signed<T> {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct ThreshSigned<T> {
     pub data: T,
     pub signature: ThreshSignature,
@@ -63,6 +76,7 @@ impl<T> Signed<T> {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct BlockKey {
     pub type_: BlockType,
     pub view: ViewNum,
@@ -88,6 +102,7 @@ pub const GEN_BLOCK_KEY: BlockKey = BlockKey {
 };
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct VoteData {
     pub z: u8,
     pub for_which: BlockKey,
@@ -110,6 +125,7 @@ impl VoteData {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 /// Represents a view change message sent to the new leader
 ///
 /// This message is sent when a process enters a new view:
@@ -124,6 +140,7 @@ pub struct StartView {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub enum BlockData {
     Genesis,
     Tr {
@@ -135,6 +152,7 @@ pub enum BlockData {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub struct Block {
     pub key: BlockKey,
     pub prev: Vec<ThreshSigned<VoteData>>,
@@ -150,6 +168,7 @@ impl std::fmt::Debug for Block {
 
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub enum Message {
     Block(Arc<Signed<Block>>),
     NewVote(Arc<Signed<VoteData>>),
@@ -166,6 +185,7 @@ impl std::fmt::Debug for Message {
 }
 
 #[derive(Copy, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "webviz", derive(Tsify))]
 pub enum Phase {
     High = 0,
     Low = 1,
