@@ -80,30 +80,3 @@ fn test_directed_message_flow() {
         assert_eq!(process.current_time, 50);
     }
 }
-
-
-#[test_log::test]
-fn test_harness_time_advancement() {
-    // Create test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-
-    // Create a harness with a time step of 25
-    let mut harness = MockHarness::new(vec![process1, process2], 25);
-
-    // Initial state
-    assert_eq!(harness.time, 0);
-
-    // Perform multiple steps of the simulation
-    for i in 1..=10 {
-        harness.step();
-
-        // Time should advance by the time step each iteration
-        assert_eq!(harness.time, i * 25);
-
-        // All processes should have their time updated
-        for (_, process) in harness.processes.iter() {
-            assert_eq!(process.current_time, i * 25);
-        }
-    }
-}

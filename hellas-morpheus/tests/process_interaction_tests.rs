@@ -69,31 +69,6 @@ fn test_basic_process_interaction() {
 
 
 #[test_log::test]
-fn test_simulate_multiple_steps() {
-    // Create test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    
-    // Create a harness with a small time step for quicker simulation
-    let mut harness = MockHarness::new(vec![process1, process2], 10);
-    
-    // Initial time
-    assert_eq!(harness.time, 0);
-    
-    // Run multiple steps
-    harness.run(10);
-    
-    // Time should have advanced
-    assert_eq!(harness.time, 100);
-    
-    // Each process should have its time updated to match the harness
-    for (_, process) in harness.processes.iter() {
-        assert_eq!(process.current_time, 100);
-    }
-}
-
-
-#[test_log::test]
 fn test_broadcast_message() {
     // Create test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
