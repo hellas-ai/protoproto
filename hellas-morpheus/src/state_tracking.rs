@@ -232,7 +232,7 @@ impl MorpheusProcess {
                     "throughput phase",
                     &Phase::High,
                     &Phase::Low,
-                    Some("voted for a transaction block"),
+                    Some("2-voted for a transaction block"),
                 );
                 self.phase_i.insert(self.view_i, Phase::Low);
             }

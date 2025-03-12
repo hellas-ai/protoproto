@@ -139,6 +139,7 @@ impl MockHarness {
     /// 1. Process all messages
     /// 2. Check timeouts
     /// 3. Advance time
+    #[tracing::instrument(skip(self))]
     pub fn step(&mut self) -> bool {
         let processed = self.process_round();
         let timeouts = self.check_all_timeouts();

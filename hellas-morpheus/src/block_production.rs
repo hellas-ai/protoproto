@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::*;
 
 impl MorpheusProcess {
+    #[tracing::instrument(skip(self, to_send))]
     pub fn try_produce_blocks(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
         if self.payload_ready() {
             self.make_tr_block(to_send);
@@ -102,15 +103,6 @@ impl MorpheusProcess {
             author: self.id.clone(),
             signature: Signature {},
         });
-
-        // Log block creation
-        tracing::info!(
-            process_id = ?self.id,
-            block_type = "transaction",
-            view = ?self.view_i,
-            slot = ?slot,
-            "Created transaction block"
-        );
 
         // Track block creation with tracing for visualization
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
@@ -264,6 +256,8 @@ impl MorpheusProcess {
             one: one_qc,
             data: BlockData::Lead { justification },
         };
+
+        crate::tracing_setup::block_created(&self.id, "leader", &block.key);
 
         // 7. Sign and send block
         let signed_block = Arc::new(Signed {

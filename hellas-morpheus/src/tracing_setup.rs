@@ -1,4 +1,4 @@
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, error, info};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, Registry};
 

@@ -4,11 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    block_validation::BlockValidationError,
-    format::{format_block_key, format_message, format_vote_data},
-    *,
-};
+use crate::{format::format_message, *};
 use serde::{Deserialize, Serialize};
 
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
@@ -412,6 +408,13 @@ impl MorpheusProcess {
                         .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
                 {
                     if self.try_vote(1, &block.data.key, None, to_send) {
+                        crate::tracing_setup::protocol_transition(
+                            &self.id,
+                            "throughput phase",
+                            &Phase::High,
+                            &Phase::Low,
+                            Some("1-voted for a transaction block"),
+                        );
                         self.phase_i.insert(self.view_i, Phase::Low);
                     }
                 }
