@@ -79,11 +79,11 @@ pub struct MorpheusProcess {
 
     /// Tracks view change messages
     /// Used to collect view v messages with 1-QCs sent to the leader
-    pub start_views: BTreeMap<ViewNum, Vec<Signed<StartView>>>,
+    pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
     /// Stores QCs indexed by their VoteData
     /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
-    pub qcs: BTreeMap<VoteData, ThreshSigned<VoteData>>,
+    pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
 
     /// Tracks the maximum view seen and its associated VoteData
     pub max_view: (ViewNum, VoteData),
@@ -95,10 +95,10 @@ pub struct MorpheusProcess {
     /// Stores the maximum 1-QC seen by this process
     /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v),
     /// where q' is a maximal amongst 1-QCs seen by p_i"
-    pub max_1qc: ThreshSigned<VoteData>,
+    pub max_1qc: Arc<ThreshSigned<VoteData>>,
 
     /// Stores all 1-QCs seen by this process
-    pub all_1qc: BTreeSet<ThreshSigned<VoteData>>,
+    pub all_1qc: BTreeSet<Arc<ThreshSigned<VoteData>>>,
 
     /// Stores the current tips of the block DAG
     /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
@@ -106,7 +106,7 @@ pub struct MorpheusProcess {
 
     /// Maps block keys to blocks (part of M_i in pseudocode)
     /// Implements part of "the set of all received messages"
-    pub blocks: BTreeMap<BlockKey, Signed<Arc<Block>>>,
+    pub blocks: BTreeMap<BlockKey, Arc<Signed<Block>>>,
 
     /// Tracks which blocks point to which other blocks
     /// Used to efficiently determine the DAG structure
@@ -135,15 +135,15 @@ pub struct MorpheusProcess {
     // === Performance optimization indexes ===
     /// Quick index to QCs by block type, author, and slot
     /// Enables O(1) lookup of QCs
-    pub qc_index: BTreeMap<(BlockType, Identity, SlotNum), ThreshSigned<VoteData>>,
+    pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), Arc<ThreshSigned<VoteData>>>,
 
     /// Maps (type, author, view) to QCs for efficient retrieval
     /// Used to find QCs for a specific block type, author, and view
-    pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<ThreshSigned<VoteData>>>,
+    pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<Arc<ThreshSigned<VoteData>>>>,
 
     /// Maps (type, view, author) to blocks for efficient retrieval
     /// Used to find blocks of a specific type, view, and author
-    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Signed<Arc<Block>>>>,
+    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block>>>>,
 
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
@@ -162,7 +162,7 @@ pub struct MorpheusProcess {
 pub struct VoteTrack<T: Ord> {
     /// Maps vote data to a map of (voter identity -> signed vote)
     /// Ensures we only count one vote per process and track when we reach a quorum
-    pub votes: BTreeMap<T, BTreeMap<Identity, Signed<T>>>,
+    pub votes: BTreeMap<T, BTreeMap<Identity, Arc<Signed<T>>>>,
 }
 
 /// Error when attempting to record a duplicate vote from the same process
@@ -174,7 +174,7 @@ impl<T: Ord + Clone> VoteTrack<T> {
     /// This helps implement the quorum formation logic from the pseudocode:
     /// "A z-quorum for b is a set of n-f z-votes for b, each signed by a different process in Π"
     /// Returns Err(Duplicate) if this process has already voted for this data.
-    pub fn record_vote(&mut self, vote: Signed<T>) -> Result<usize, Duplicate> {
+    pub fn record_vote(&mut self, vote: Arc<Signed<T>>) -> Result<usize, Duplicate> {
         let votes_now = self
             .votes
             .entry(vote.data.clone())
@@ -197,8 +197,8 @@ impl MorpheusProcess {
         crate::tracing_setup::register_process(&id, n, f);
 
         // Create genesis block and its 1-QC
-        let genesis_block = Signed {
-            data: Arc::new(Block {
+        let genesis_block = Arc::new(Signed {
+            data: Block {
                 key: GEN_BLOCK_KEY,
                 prev: Vec::new(),
                 one: ThreshSigned {
@@ -209,18 +209,18 @@ impl MorpheusProcess {
                     signature: ThreshSignature {},
                 },
                 data: BlockData::Genesis,
-            }),
+            },
             author: Identity(u64::MAX),
             signature: Signature {},
-        };
+        });
 
-        let genesis_qc = ThreshSigned {
+        let genesis_qc = Arc::new(ThreshSigned {
             data: VoteData {
                 z: 1,
                 for_which: GEN_BLOCK_KEY,
             },
             signature: ThreshSignature {},
-        };
+        });
 
         // Initialize with a recommended default timeout
         MorpheusProcess {
@@ -277,7 +277,7 @@ impl MorpheusProcess {
             contains_lead_by_view: BTreeMap::new(),
             unfinalized_lead_by_view: BTreeMap::new(),
 
-            qc_index: BTreeMap::from([(
+            qc_by_slot: BTreeMap::from([(
                 (BlockType::Genesis, Identity(u64::MAX), SlotNum(0)),
                 genesis_qc.clone(),
             )]),
@@ -317,7 +317,7 @@ impl MorpheusProcess {
         Identity(view.0 as u64 % self.n as u64)
     }
 
-    pub fn block_valid(&self, block: &Signed<Arc<Block>>) -> bool {
+    pub fn block_valid(&self, block: &Signed<Block>) -> bool {
         if !block.is_valid() {
             return false;
         }
@@ -485,7 +485,7 @@ impl MorpheusProcess {
                     view = ?block.data.key.view,
                     "Processing block message"
                 );
-                self.record_block(block.clone(), to_send);
+                self.record_block(&block, to_send);
                 if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
                     // If ∃𝑏 ∈𝑀𝑖 with 𝑏.type= lead, 𝑏.view= view𝑖 , voted𝑖 (1,lead,𝑏.slot,𝑏.auth)= 0 then:
                     if block.data.key.type_ == BlockType::Lead && block.data.key.view == self.view_i
@@ -532,7 +532,7 @@ impl MorpheusProcess {
                 self.record_vote(&vote_data, to_send);
             }
             Message::QC(qc) => {
-                self.record_qc(qc, to_send);
+                self.record_qc(&qc, to_send);
                 if self.max_view.0 > self.view_i {
                     self.end_view(
                         Message::QC(self.qcs.get(&self.max_view.1).cloned().unwrap()),
@@ -549,10 +549,10 @@ impl MorpheusProcess {
                     Ok(num_votes) => {
                         if end_view.data > self.view_i && num_votes >= self.f + 1 {
                             to_send.push((
-                                Message::EndViewCert(ThreshSigned {
+                                Message::EndViewCert(Arc::new(ThreshSigned {
                                     data: end_view.data,
                                     signature: ThreshSignature {},
-                                }),
+                                })),
                                 None,
                             ));
                         }
@@ -573,7 +573,7 @@ impl MorpheusProcess {
                 if start_view.data.qc.data.z != 1 {
                     return false;
                 }
-                self.record_qc(start_view.data.qc.clone(), to_send);
+                self.record_qc(&Arc::new(start_view.data.qc.clone()), to_send);
                 self.start_views
                     .entry(start_view.data.view)
                     .or_insert(Vec::new())
@@ -615,14 +615,14 @@ impl MorpheusProcess {
             }
         }
         to_send.push((
-            Message::StartView(Signed {
+            Message::StartView(Arc::new(Signed {
                 data: StartView {
                     view: new_view,
-                    qc: self.max_1qc.clone(),
+                    qc: ThreshSigned::clone(&self.max_1qc),
                 },
                 author: self.id.clone(),
                 signature: Signature {},
-            }),
+            })),
             Some(self.lead(new_view)),
         ));
     }
@@ -665,45 +665,13 @@ impl MorpheusProcess {
         // Second timeout - 12Δ, send end-view message
         if time_in_view >= self.delta * 12 && !self.unfinalized.is_empty() {
             to_send.push((
-                Message::EndView(Signed {
+                Message::EndView(Arc::new(Signed {
                     data: self.view_i,
                     author: self.id.clone(),
                     signature: Signature {},
-                }),
+                })),
                 None,
             ));
-        }
-    }
-
-    pub fn try_vote(
-        &mut self,
-        z: u8,
-        block: &BlockKey,
-        target: Option<Identity>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) -> bool {
-        let author = block.author.clone().expect("validated");
-
-        if !self
-            .voted_i
-            .contains(&(z, block.type_, block.slot, author.clone()))
-        {
-            self.voted_i
-                .insert((z, block.type_, block.slot, author.clone()));
-
-            let voted = Signed {
-                data: VoteData {
-                    z,
-                    for_which: block.clone(),
-                },
-                author: self.id.clone(),
-                signature: Signature {},
-            };
-            self.record_vote(&voted, to_send);
-            to_send.push((Message::NewVote(voted), target));
-            true
-        } else {
-            false
         }
     }
 }

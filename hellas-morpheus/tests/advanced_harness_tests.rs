@@ -21,17 +21,17 @@ fn test_multiple_message_processing() {
     let mut harness = create_test_setup();
     
     // Create a few simple messages
-    let message1 = Message::EndView(Signed {
+    let message1 = Message::EndView(Arc::new(Signed {
         data: ViewNum(0),
         author: Identity(1),
         signature: Signature {},
-    });
+    }));
     
-    let message2 = Message::EndView(Signed {
+    let message2 = Message::EndView(Arc::new(Signed {
         data: ViewNum(1),
         author: Identity(2),
         signature: Signature {},
-    });
+    }));
     
     // Enqueue the messages for specific destinations
     harness.enqueue_message(message1, Identity(1), Some(Identity(2)));
@@ -91,10 +91,10 @@ fn test_complex_simulation() {
     };
     
     // Create a QC message
-    let qc_message = Message::QC(ThreshSigned {
+    let qc_message = Message::QC(Arc::new(ThreshSigned {
         data: vote_data,
         signature: ThreshSignature {},
-    });
+    }));
     
     // Broadcast the message
     harness.enqueue_message(qc_message, Identity(1),  None);
@@ -131,7 +131,7 @@ fn test_message_enqueue_and_processing() {
     };
     
     // Create a NewVote message
-    let vote_message = Message::NewVote(signed_vote);
+    let vote_message = Message::NewVote(Arc::new(signed_vote));
     
     // Enqueue the message for a specific destination
     harness.enqueue_message(vote_message, Identity(1), Some(Identity(2)));
@@ -163,11 +163,11 @@ fn test_step_sequence() {
     assert_eq!(harness.time, 100);
     
     // Add a message after the first step
-    let message = Message::EndView(Signed {
+    let message = Message::EndView(Arc::new(Signed {
         data: ViewNum(0),
         author: Identity(1),
         signature: Signature {},
-    });
+    }));
     
     harness.enqueue_message(message, Identity(1), Some(Identity(2)));
     

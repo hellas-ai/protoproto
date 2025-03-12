@@ -30,7 +30,7 @@ impl MorpheusProcess {
         // If this is not the first transaction block, ensure we have a QC for our previous block
         if self.slot_i_tr > SlotNum(0) {
             // Use our index to efficiently check for previous block QC
-            let has_prev_qc = self.qc_index.contains_key(&(
+            let has_prev_qc = self.qc_by_slot.contains_key(&(
                 BlockType::Tr,
                 self.id.clone(),
                 SlotNum(self.slot_i_tr.0 - 1),
@@ -53,7 +53,7 @@ impl MorpheusProcess {
         if slot.0 > 0 {
             // Use our index for direct lookup
             if let Some(prev_qc) =
-                self.qc_index
+                self.qc_by_slot
                     .get(&(BlockType::Tr, self.id.clone(), SlotNum(slot.0 - 1)))
             {
                 prev_qcs.push(prev_qc.clone());
@@ -104,22 +104,22 @@ impl MorpheusProcess {
         };
 
         // Create block with sample transaction
-        let block = Arc::new(Block {
+        let block = Block {
             key: block_key.clone(),
-            prev: prev_qcs,
-            one: max_1qc,
+            prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
+            one: ThreshSigned::clone(&max_1qc),
             data: BlockData::Tr {
                 transactions: vec![Transaction::Opaque(vec![0, 1, 2])], // Sample transaction
             },
-        });
+        };
 
         // 6. Sign and send block
-        let signed_block = Signed {
+        let signed_block = Arc::new(Signed {
             data: block.clone(),
             author: self.id.clone(),
             signature: Signature {},
-        };
-        
+        });
+
         // Log block creation
         tracing::info!(
             process_id = ?self.id,
@@ -128,16 +128,16 @@ impl MorpheusProcess {
             slot = ?slot,
             "Created transaction block"
         );
-        
+
         // Track block creation with tracing for visualization
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
         crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
-        
+
         // Broadcast block to all processes
         to_send.push((Message::Block(signed_block.clone()), None));
-        
+
         // Record block locally
-        self.record_block(signed_block, to_send);
+        self.record_block(&signed_block, to_send);
     }
 
     // LeaderReady - Efficiently determines if leader is ready to produce a block
@@ -162,7 +162,7 @@ impl MorpheusProcess {
 
             // Check for previous leader block QC if not at slot 0
             let has_prev_qc = if slot.0 > 0 {
-                self.qc_index
+                self.qc_by_slot
                     .contains_key(&(BlockType::Lead, self.id.clone(), SlotNum(slot.0 - 1)))
             } else {
                 true
@@ -195,7 +195,7 @@ impl MorpheusProcess {
         let view = self.view_i;
 
         // 2. Initially set prev to tips - already efficiently managed
-        let mut prev_qcs: Vec<ThreshSigned<VoteData>> = self
+        let mut prev_qcs: Vec<Arc<ThreshSigned<VoteData>>> = self
             .tips
             .iter()
             .filter_map(|tip| self.qcs.get(tip).cloned())
@@ -204,7 +204,7 @@ impl MorpheusProcess {
         // 3. Add pointer to previous leader block if applicable - efficient lookup
         if slot.0 > 0 {
             if let Some(prev_qc) =
-                self.qc_index
+                self.qc_by_slot
                     .get(&(BlockType::Lead, self.id.clone(), SlotNum(slot.0 - 1)))
             {
                 if !prev_qcs
@@ -234,6 +234,10 @@ impl MorpheusProcess {
         let (one_qc, justification) = if !has_produced_lead_block {
             // 5a. For first leader block, include justification and set 1-QC
             let view_messages = self.start_views.get(&view).cloned().unwrap_or_default();
+            let view_messages = view_messages
+                .into_iter()
+                .map(|msg| Signed::clone(&msg))
+                .collect::<Vec<_>>();
 
             // Find max 1-QC from view messages
             let max_qc = view_messages
@@ -241,7 +245,7 @@ impl MorpheusProcess {
                 .map(|msg| &msg.data.qc)
                 .max_by(|a, b| a.data.compare_qc(&b.data))
                 .cloned()
-                .unwrap_or(self.max_1qc.clone());
+                .unwrap_or_else(|| ThreshSigned::clone(&self.max_1qc));
 
             (max_qc, view_messages)
         } else {
@@ -254,8 +258,8 @@ impl MorpheusProcess {
                     qcs.iter()
                         .find(|qc| qc.data.z == 1 && qc.data.for_which.slot == SlotNum(slot.0 - 1))
                 })
-                .cloned()
-                .unwrap_or(self.max_1qc.clone());
+                .map(|qc| ThreshSigned::clone(qc))
+                .unwrap_or_else(|| ThreshSigned::clone(&self.max_1qc));
 
             (prev_leader_qc, vec![])
         };
@@ -271,19 +275,19 @@ impl MorpheusProcess {
         };
 
         // Create block
-        let block = Arc::new(Block {
+        let block = Block {
             key: block_key.clone(),
-            prev: prev_qcs,
+            prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
             one: one_qc,
             data: BlockData::Lead { justification },
-        });
+        };
 
         // 7. Sign and send block
-        let signed_block = Signed {
+        let signed_block = Arc::new(Signed {
             data: block,
             author: self.id.clone(),
             signature: Signature {},
-        };
+        });
 
         to_send.push((Message::Block(signed_block), None));
 

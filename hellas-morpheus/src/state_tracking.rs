@@ -8,10 +8,10 @@ use crate::*;
 
 impl MorpheusProcess {
     /// Returns false if the vote is a duplicate (sender already voted there)
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, to_send))]
     pub fn record_vote(
         &mut self,
-        vote_data: &Signed<VoteData>,
+        vote_data: &Arc<Signed<VoteData>>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
         match self.vote_tracker.record_vote(vote_data.clone()) {
@@ -27,13 +27,13 @@ impl MorpheusProcess {
                         && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
                     {
                         self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
-                        to_send.push((Message::QC(quorum_formed.clone()), None));
+                        to_send.push((Message::QC(Arc::new(quorum_formed.clone())), None));
                     }
                     self.record_qc(
-                        ThreshSigned {
+                        &Arc::new(ThreshSigned {
                             data: vote_data.data.clone(),
                             signature: ThreshSignature {},
-                        },
+                        }),
                         to_send,
                     );
                 }
@@ -56,9 +56,10 @@ impl MorpheusProcess {
     ///
     /// It's not clear that this is correct, and it may even be slower than a
     /// more naive approach if the set sizes were kept small.
+    #[tracing::instrument(skip(self, to_send))]
     pub fn record_qc(
         &mut self,
-        qc: ThreshSigned<VoteData>,
+        qc: &Arc<ThreshSigned<VoteData>>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) {
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
@@ -69,7 +70,7 @@ impl MorpheusProcess {
 
         // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
-            self.qc_index.insert(
+            self.qc_by_slot.insert(
                 (
                     qc.data.for_which.type_,
                     author.clone(),
@@ -215,9 +216,10 @@ impl MorpheusProcess {
     /// updated and specifies the set of all received messages."
     ///
     /// It will also record any QCs that are used as pointers in the block.
+    #[tracing::instrument(skip(self, to_send))]
     pub fn record_block(
         &mut self,
-        block: Signed<Arc<Block>>,
+        block: &Arc<Signed<Block>>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) {
         if block.data.key.height > self.max_height.0 {
@@ -250,7 +252,8 @@ impl MorpheusProcess {
             .iter()
             .chain(Some(&block.data.one).into_iter())
         {
-            self.record_qc(qc.clone(), to_send);
+            // TODO: these Arc are temporary....
+            self.record_qc(&Arc::new(qc.clone()), to_send);
         }
     }
 
@@ -313,5 +316,38 @@ impl MorpheusProcess {
             }
         }
         false
+    }
+
+    #[tracing::instrument(skip(self, to_send))]
+    pub fn try_vote(
+        &mut self,
+        z: u8,
+        block: &BlockKey,
+        target: Option<Identity>,
+        to_send: &mut Vec<(Message, Option<Identity>)>,
+    ) -> bool {
+        let author = block.author.clone().expect("not voting for genesis block");
+
+        if !self
+            .voted_i
+            .contains(&(z, block.type_, block.slot, author.clone()))
+        {
+            self.voted_i
+                .insert((z, block.type_, block.slot, author.clone()));
+
+            let voted = Arc::new(Signed {
+                data: VoteData {
+                    z,
+                    for_which: block.clone(),
+                },
+                author: self.id.clone(),
+                signature: Signature {},
+            });
+            self.record_vote(&voted, to_send);
+            to_send.push((Message::NewVote(voted.clone()), target));
+            true
+        } else {
+            false
+        }
     }
 }

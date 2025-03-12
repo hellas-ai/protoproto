@@ -47,11 +47,11 @@ fn test_basic_process_interaction() {
     let mut harness = MockHarness::new(vec![process1, process2], 100);
     
     // Create a simple EndView message to trigger some interaction
-    let end_view_message = Message::EndView(hellas_morpheus::Signed {
+    let end_view_message = Message::EndView(Arc::new(hellas_morpheus::Signed {
         data: ViewNum(0), 
         author: Identity(1),
         signature: Signature {},
-    });
+    }));
     
     // Enqueue the message for process2
     harness.enqueue_message(end_view_message, Identity(1), Some(Identity(2)));
@@ -102,11 +102,11 @@ fn test_broadcast_message() {
     let mut harness = MockHarness::new(vec![process1, process2, process3], 100);
     
     // Create a simple EndView message to broadcast
-    let end_view_message = Message::EndView(hellas_morpheus::Signed {
+    let end_view_message = Message::EndView(Arc::new(hellas_morpheus::Signed {
         data: ViewNum(0),
         author: Identity(1),
         signature: Signature {},
-    });
+    }));
     
     // Broadcast the message (destination = None)
     harness.enqueue_message(end_view_message,  Identity(1), None);

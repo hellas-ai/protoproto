@@ -1,4 +1,4 @@
-use hellas_morpheus::{Identity, Message, MorpheusProcess, Transaction};
+use hellas_morpheus::*;
 use hellas_morpheus::mock_harness::MockHarness;
 use std::sync::Arc;
 
@@ -97,11 +97,11 @@ fn test_mock_harness_enqueue_message() {
     
     // Create a dummy message (this would be more complex in a real test)
     // For this basic test, we'll use a placeholder
-    let dummy_message = Message::EndView(hellas_morpheus::Signed {
+    let dummy_message = Message::EndView(Arc::new(Signed {
         data: hellas_morpheus::ViewNum(0),
         author: Identity(1),
         signature: hellas_morpheus::Signature {},
-    });
+    }));
     
     // Enqueue a message for a specific destination
     harness.enqueue_message(dummy_message.clone(),  Identity(1), Some(Identity(2)));

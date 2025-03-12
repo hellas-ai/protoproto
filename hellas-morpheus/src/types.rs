@@ -1,8 +1,4 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, VecDeque, vec_deque},
-    sync::Arc,
-};
+use std::sync::Arc;
 use serde::{Serialize, Deserialize};
 
 use crate::debug_impls;
@@ -128,14 +124,21 @@ pub struct Block {
     pub data: BlockData,
 }
 
+impl std::fmt::Debug for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", debug_impls::format_block(self, true))
+    }
+}
+
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Message {
-    Block(Signed<Arc<Block>>),
-    NewVote(Signed<VoteData>),
-    QC(ThreshSigned<VoteData>),
-    EndView(Signed<ViewNum>),
-    EndViewCert(ThreshSigned<ViewNum>),
-    StartView(Signed<StartView>),
+    Block(Arc<Signed<Block>>),
+    NewVote(Arc<Signed<VoteData>>),
+    QC(Arc<ThreshSigned<VoteData>>),
+    EndView(Arc<Signed<ViewNum>>),
+    EndViewCert(Arc<ThreshSigned<ViewNum>>),
+    StartView(Arc<Signed<StartView>>),
 }
 
 impl std::fmt::Debug for Message {

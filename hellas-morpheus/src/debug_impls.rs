@@ -29,7 +29,6 @@
  */
 
 use std::fmt::Write;
-use std::sync::Arc;
 
 use crate::types::*;
 
