@@ -2,7 +2,8 @@ use hellas_morpheus::*;
 use hellas_morpheus::mock_harness::{MockHarness, TxGenPolicy};
 use std::sync::Arc;
 
-#[test]
+
+#[test_log::test]
 fn test_mock_harness_creation() {
     // Create a few test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
@@ -19,7 +20,8 @@ fn test_mock_harness_creation() {
     assert_eq!(harness.time_step, 100);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_mock_harness_advance_time() {
     // Create a test process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
@@ -39,7 +41,8 @@ fn test_mock_harness_advance_time() {
     assert_eq!(harness.time, 200);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_mock_harness_step() {
     // Create a test process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
@@ -60,7 +63,8 @@ fn test_mock_harness_step() {
     assert_eq!(made_progress, false);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_mock_harness_run() {
     // Create a test process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
@@ -82,7 +86,8 @@ fn test_mock_harness_run() {
     assert_eq!(made_progress, false);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_mock_harness_enqueue_message() {
     // Create test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
@@ -115,8 +120,11 @@ fn test_mock_harness_enqueue_message() {
     assert_eq!(harness.pending_messages.len(), 2);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_check_invariants() {
+    assert!(cfg!(debug_assertions));
+
     // Create a test process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
     let process2 = MorpheusProcess::new(Identity(2), 3, 1);
@@ -138,6 +146,6 @@ fn test_check_invariants() {
         .insert(Identity(3), TxGenPolicy::EveryNSteps { n: 2 });
 
     
-    // Let the system run for a while, the harness checks invariants after each message.
-    harness.run(50);
+    // Let the system run for a while.
+    harness.run(60);
 } 

@@ -91,22 +91,6 @@ pub fn message_sent(
     }
 }
 
-/// Track message receiving for visualization
-pub fn message_received(
-    recipient: &crate::Identity,
-    from: &crate::Identity,
-    message_type: &str,
-    message: impl std::fmt::Debug,
-) {
-    debug!(
-        recipient = ?recipient,
-        from = ?from,
-        message_type = message_type,
-        message = ?message,
-        "Message received"
-    );
-}
-
 /// Track block creation events
 pub fn block_created(
     author: &crate::Identity,

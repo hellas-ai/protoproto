@@ -4,7 +4,8 @@ use hellas_morpheus::{
 };
 use std::sync::Arc;
 
-#[test]
+
+#[test_log::test]
 fn test_format_functions() {
     // Create some test instances
     let identity = Identity(42);

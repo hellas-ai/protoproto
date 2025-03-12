@@ -118,8 +118,13 @@ pub enum InvariantViolation {
     },
 
     // Vote tracking consistency
-    VoteTrackContainsDuplicateVotes {
+    UntrackedVote {
+        vote_data: Signed<VoteData>,
+    },
+    VoteCountMismatch {
         vote_data: VoteData,
+        received_count: usize,
+        tracked_count: usize,
     },
     MissingQCDespiteQuorum {
         vote_data: VoteData,
@@ -304,10 +309,23 @@ impl fmt::Display for InvariantViolation {
                 leader.0, view.0
             ),
 
-            Self::VoteTrackContainsDuplicateVotes { vote_data } => write!(
+            Self::UntrackedVote { vote_data } => write!(
                 f,
-                "VoteData {:?} in vote_tracker contains duplicate votes",
-                format_vote_data(vote_data, false)
+                "VoteData {:?} received in NewVote message from {:?} but not found in vote_tracker",
+                format_vote_data(&vote_data.data, false),
+                vote_data.author
+            ),
+
+            Self::VoteCountMismatch {
+                vote_data,
+                received_count,
+                tracked_count,
+            } => write!(
+                f,
+                "VoteData {:?} received {} times but tracked {} times",
+                format_vote_data(vote_data, false),
+                received_count,
+                tracked_count
             ),
 
             Self::MissingQCDespiteQuorum { vote_data } => write!(
@@ -628,30 +646,49 @@ impl MorpheusProcess {
             });
         }
 
-        for (vote_data, _) in &self.vote_tracker.votes {
-            if self.vote_tracker.votes[vote_data].len() > 1 {
-                violations.push(InvariantViolation::VoteTrackContainsDuplicateVotes { vote_data: vote_data.clone() });
-            }
-        }
-
         // Count all the voting messages manually and check that a QC is present for each with quorum
         let mut vote_counts = BTreeMap::new();
         for msg in &self.received_messages {
             match msg {
                 Message::NewVote(vote) => {
-                    *vote_counts.entry(vote.data.clone()).or_insert(0) += 1;
+                    *vote_counts.entry(vote.data.clone()).or_insert(0usize) += 1;
+                    if !self
+                        .vote_tracker
+                        .votes
+                        .get(&vote.data)
+                        .unwrap()
+                        .contains_key(&vote.author)
+                    {
+                        violations.push(InvariantViolation::UntrackedVote {
+                            vote_data: Signed::clone(&vote),
+                        });
+                    }
                 }
                 _ => {}
             }
         }
-        for (vote_data, count) in &vote_counts {
-            if count >= &((self.n - self.f) as u32) {
+        for (vote_data, &received_count) in &vote_counts {
+            if received_count >= self.n - self.f {
                 if !self.qcs.contains_key(vote_data) {
-                    violations.push(InvariantViolation::MissingQCDespiteQuorum { vote_data: vote_data.clone() });
+                    violations.push(InvariantViolation::MissingQCDespiteQuorum {
+                        vote_data: vote_data.clone(),
+                    });
                 }
             }
+            let tracked_count = self
+                .vote_tracker
+                .votes
+                .get(&vote_data)
+                .unwrap_or(&BTreeMap::new())
+                .len();
+            if received_count != tracked_count {
+                violations.push(InvariantViolation::VoteCountMismatch {
+                    vote_data: vote_data.clone(),
+                    received_count,
+                    tracked_count,
+                });
+            }
         }
-
 
         violations
     }

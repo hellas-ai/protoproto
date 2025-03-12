@@ -3,7 +3,8 @@ use std::sync::Arc;
 use hellas_morpheus::mock_harness::{MockHarness, TxGenPolicy};
 use hellas_morpheus::{Identity, Message, MorpheusProcess, Signature, Signed, ViewNum};
 
-#[test]
+
+#[test_log::test]
 fn test_basic_integration() {
     // Create 3 test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
@@ -39,7 +40,8 @@ fn test_basic_integration() {
     }
 }
 
-#[test]
+
+#[test_log::test]
 fn test_directed_message_flow() {
     // Create 3 test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
@@ -79,7 +81,8 @@ fn test_directed_message_flow() {
     }
 }
 
-#[test]
+
+#[test_log::test]
 fn test_harness_time_advancement() {
     // Create test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);

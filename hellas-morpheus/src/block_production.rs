@@ -117,7 +117,7 @@ impl MorpheusProcess {
         crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
 
         self.record_block(&signed_block, to_send);
-        to_send.push((Message::Block(signed_block.clone()), None));
+        self.send_msg(to_send, (Message::Block(signed_block.clone()), None));
     }
 
     // LeaderReady - Efficiently determines if leader is ready to produce a block
@@ -273,7 +273,7 @@ impl MorpheusProcess {
         });
 
         self.record_block(&signed_block, to_send);
-        to_send.push((Message::Block(signed_block), None));
+        self.send_msg(to_send, (Message::Block(signed_block), None));
 
         // 8. Update leader slot
         self.slot_i_lead = SlotNum(self.slot_i_lead.0 + 1);

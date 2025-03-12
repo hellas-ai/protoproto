@@ -33,7 +33,7 @@ impl MorpheusProcess {
                 signature: Signature {},
             });
             self.record_vote(&voted, to_send);
-            to_send.push((Message::NewVote(voted.clone()), target));
+            self.send_msg(to_send, (Message::NewVote(voted.clone()), target));
             true
         } else {
             false
@@ -51,28 +51,25 @@ impl MorpheusProcess {
             Ok(num_votes) => {
                 if num_votes == self.n - self.f {
                     // TODO: real crypto
-                    let quorum_formed = ThreshSigned {
+                    let quorum_formed = Arc::new(ThreshSigned {
                         data: vote_data.data.clone(),
                         signature: ThreshSignature {},
-                    };
+                    });
                     if vote_data.data.z == 0
                         && vote_data.data.for_which.author.as_ref() == Some(&self.id)
                         && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
                     {
                         self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
-                        to_send.push((Message::QC(Arc::new(quorum_formed.clone())), None));
+                        self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
                     }
-                    self.record_qc(
-                        &Arc::new(ThreshSigned {
-                            data: vote_data.data.clone(),
-                            signature: ThreshSignature {},
-                        }),
-                        to_send,
-                    );
+                    self.record_qc(&quorum_formed, to_send);
                 }
                 true
             }
-            Err(Duplicate) => false,
+            Err(Duplicate) => {
+                tracing::warn!("Duplicate vote for {:?} from {:?}", vote_data.data, vote_data.author);
+                false
+            }
         }
     }
 
@@ -270,8 +267,8 @@ impl MorpheusProcess {
         }
 
         let block_key = block.data.key.clone();
-        self.finalized.insert(block_key.clone(), false);
-        self.blocks.insert(block_key.clone(), block.clone());
+        assert_eq!(self.finalized.insert(block_key.clone(), false), None);
+        assert_eq!(self.blocks.insert(block_key.clone(), block.clone()), None);
 
         for qc in &block.data.prev {
             self.block_pointed_by

@@ -5,7 +5,8 @@ use hellas_morpheus::{
 use hellas_morpheus::mock_harness::MockHarness;
 use std::sync::Arc;
 
-#[test]
+
+#[test_log::test]
 fn test_process_round_no_messages() {
     // Create a process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
@@ -21,7 +22,8 @@ fn test_process_round_no_messages() {
     assert_eq!(made_progress, false);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_check_all_timeouts() {
     // Create a process
     let process = MorpheusProcess::new(Identity(1), 3, 1);
@@ -36,7 +38,8 @@ fn test_check_all_timeouts() {
     assert_eq!(made_progress, false);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_basic_process_interaction() {
     // Create test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
@@ -64,7 +67,8 @@ fn test_basic_process_interaction() {
     assert_eq!(harness.pending_messages.len(), 0);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_simulate_multiple_steps() {
     // Create test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);
@@ -88,7 +92,8 @@ fn test_simulate_multiple_steps() {
     }
 }
 
-#[test]
+
+#[test_log::test]
 fn test_broadcast_message() {
     // Create test processes
     let process1 = MorpheusProcess::new(Identity(1), 3, 1);

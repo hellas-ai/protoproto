@@ -16,7 +16,8 @@ fn create_test_setup() -> MockHarness {
     MockHarness::new(vec![process1, process2, process3], 100)
 }
 
-#[test]
+
+#[test_log::test]
 fn test_multiple_message_processing() {
     let mut harness = create_test_setup();
 
@@ -47,7 +48,8 @@ fn test_multiple_message_processing() {
     assert_eq!(harness.pending_messages.len(), 0);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_time_advancement_affects_processes() {
     let mut harness = create_test_setup();
 
@@ -69,7 +71,8 @@ fn test_time_advancement_affects_processes() {
     }
 }
 
-#[test]
+
+#[test_log::test]
 fn test_complex_simulation() {
     let mut harness = create_test_setup();
 
@@ -106,7 +109,8 @@ fn test_complex_simulation() {
     assert_eq!(harness.time, 500);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_message_enqueue_and_processing() {
     let mut harness = create_test_setup();
 
@@ -146,7 +150,8 @@ fn test_message_enqueue_and_processing() {
     assert_eq!(harness.pending_messages.len(), 0);
 }
 
-#[test]
+
+#[test_log::test]
 fn test_step_sequence() {
     let mut harness = create_test_setup();
 

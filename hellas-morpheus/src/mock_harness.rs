@@ -75,13 +75,6 @@ impl MockHarness {
                     // Deliver to specific node
                     if let Some(process) = self.processes.get_mut(&id) {
                         let result = process.process_message(message, sender.clone(), &mut to_send);
-                        let violations = process.check_invariants();
-                        assert!(
-                            violations.is_empty(),
-                            "Process {} has invariant violations during simulation: {:?}",
-                            id.0,
-                            violations
-                        );
 
                         if result {
                             made_progress = true;
@@ -91,16 +84,8 @@ impl MockHarness {
                 None => {
                     // Broadcast to all nodes
                     for (_, process) in self.processes.iter_mut() {
-                        let mut to_send = Vec::new();
                         let result =
                             process.process_message(message.clone(), sender.clone(), &mut to_send);
-                        let violations = process.check_invariants();
-                        assert!(
-                            violations.is_empty(),
-                            "Process {} has invariant violations during simulation: {:?}",
-                            process.id.0,
-                            violations
-                        );
 
                         if result {
                             made_progress = true;

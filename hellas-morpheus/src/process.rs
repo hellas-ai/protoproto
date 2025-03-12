@@ -5,8 +5,8 @@ use std::{
 };
 
 use crate::{
-    format::{format_block_key, format_message, format_vote_data},
     block_validation::BlockValidationError,
+    format::{format_block_key, format_message, format_vote_data},
     *,
 };
 use serde::{Deserialize, Serialize};
@@ -158,7 +158,7 @@ pub struct MorpheusProcess {
     pub ready_transactions: Vec<Transaction>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// Tracks votes for a particular data type and helps form quorums
 ///
 /// This is an implementation helper that tracks votes from different processes
@@ -314,6 +314,18 @@ impl MorpheusProcess {
         }
     }
 
+    #[tracing::instrument(skip(self, to_send), fields(process_id = ?self.id))]
+    pub(crate) fn send_msg(
+        &mut self,
+        to_send: &mut Vec<(Message, Option<Identity>)>,
+        message: (Message, Option<Identity>),
+    ) {
+        if message.1.is_none() || message.1.as_ref().unwrap() == &self.id {
+            self.received_messages.insert(message.0.clone());
+        }
+        to_send.push(message);
+    }
+
     pub fn set_now(&mut self, now: u128) {
         self.current_time = now;
     }
@@ -326,20 +338,13 @@ impl MorpheusProcess {
         Identity(view.0 as u64 % self.n as u64)
     }
 
+    #[tracing::instrument(skip(self, to_send), fields(process_id = ?self.id))]
     pub fn process_message(
         &mut self,
         message: Message,
         sender: Identity,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
-        // Record message receipt for visualization
-        crate::tracing_setup::message_received(
-            &self.id,
-            &sender,
-            "process_message",
-            format_message(&message, true),
-        );
-
         // Check if we've seen this message before (duplicate detection)
         if cfg!(debug_assertions) {
             if self.received_messages.contains(&message) {
@@ -354,6 +359,7 @@ impl MorpheusProcess {
 
         // Record that we've received this message
         self.received_messages.insert(message.clone());
+
         match message {
             Message::Block(block) => {
                 if let Err(error) = self.block_valid(&block) {
@@ -443,13 +449,16 @@ impl MorpheusProcess {
                 match self.end_views.record_vote(end_view.clone()) {
                     Ok(num_votes) => {
                         if end_view.data > self.view_i && num_votes >= self.f + 1 {
-                            to_send.push((
-                                Message::EndViewCert(Arc::new(ThreshSigned {
-                                    data: end_view.data,
-                                    signature: ThreshSignature {},
-                                })),
-                                None,
-                            ));
+                            self.send_msg(
+                                to_send,
+                                (
+                                    Message::EndViewCert(Arc::new(ThreshSigned {
+                                        data: end_view.data,
+                                        signature: ThreshSignature {},
+                                    })),
+                                    None,
+                                ),
+                            );
                         }
                     }
                     Err(Duplicate) => return false,
@@ -479,6 +488,16 @@ impl MorpheusProcess {
             }
         }
 
+        if cfg!(debug_assertions) {
+            let violations = self.check_invariants();
+            assert!(
+                violations.is_empty(),
+                "Process {} has invariant violations: {:?}",
+                self.id.0,
+                violations
+            );
+        }
+
         true
     }
 
@@ -500,29 +519,35 @@ impl MorpheusProcess {
         self.view_i = new_view;
         self.view_entry_time = self.current_time;
 
-        to_send.push((cause, None));
+        self.send_msg(to_send, (cause, None));
 
         // Send all tips we've created to the new leader
         // "Send all tips q' of Q_i such that q'.auth = p_i to lead(v)"
-        for tip in &self.tips {
+        for tip in self.tips.clone() {
             if tip.for_which.author == Some(self.id.clone()) {
-                to_send.push((
-                    Message::QC(self.qcs.get(tip).unwrap().clone()),
-                    Some(self.lead(new_view)),
-                ));
+                self.send_msg(
+                    to_send,
+                    (
+                        Message::QC(self.qcs.get(&tip).unwrap().clone()),
+                        Some(self.lead(new_view)),
+                    ),
+                );
             }
         }
-        to_send.push((
-            Message::StartView(Arc::new(Signed {
-                data: StartView {
-                    view: new_view,
-                    qc: ThreshSigned::clone(&self.max_1qc),
-                },
-                author: self.id.clone(),
-                signature: Signature {},
-            })),
-            Some(self.lead(new_view)),
-        ));
+        self.send_msg(
+            to_send,
+            (
+                Message::StartView(Arc::new(Signed {
+                    data: StartView {
+                        view: new_view,
+                        qc: ThreshSigned::clone(&self.max_1qc),
+                    },
+                    author: self.id.clone(),
+                    signature: Signature {},
+                })),
+                Some(self.lead(new_view)),
+            ),
+        );
     }
 
     /// Implements the "Complain" section from Algorithm 1
@@ -553,23 +578,29 @@ impl MorpheusProcess {
 
             if let Some(qc_data) = maximal_unfinalized {
                 self.complained_qcs.insert(qc_data.clone());
-                to_send.push((
-                    Message::QC(self.qcs.get(&qc_data).cloned().unwrap()),
-                    Some(self.lead(self.view_i)),
-                ));
+                self.send_msg(
+                    to_send,
+                    (
+                        Message::QC(self.qcs.get(&qc_data).cloned().unwrap()),
+                        Some(self.lead(self.view_i)),
+                    ),
+                );
             }
         }
 
         // Second timeout - 12Δ, send end-view message
         if time_in_view >= self.delta * 12 && !self.unfinalized.is_empty() {
-            to_send.push((
-                Message::EndView(Arc::new(Signed {
-                    data: self.view_i,
-                    author: self.id.clone(),
-                    signature: Signature {},
-                })),
-                None,
-            ));
+            self.send_msg(
+                to_send,
+                (
+                    Message::EndView(Arc::new(Signed {
+                        data: self.view_i,
+                        author: self.id.clone(),
+                        signature: Signature {},
+                    })),
+                    None,
+                ),
+            );
         }
     }
 }
