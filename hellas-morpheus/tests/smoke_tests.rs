@@ -1,5 +1,5 @@
 use hellas_morpheus::*;
-use hellas_morpheus::mock_harness::{MockHarness, TxGenPolicy};
+use hellas_morpheus::test_harness::{MockHarness, TxGenPolicy};
 use std::sync::Arc;
 
 
