@@ -1,0 +1,3 @@
+[submodule "hints"]
+	path = hints
+	url = https://github.com/hellas-ai/hints
