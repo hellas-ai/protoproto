@@ -18,5 +18,3 @@ serde_json = "1.0"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-webviz = ["dep:tsify-next", "dep:wasm-bindgen"]
-default = ["webviz"]

@@ -38,8 +38,6 @@ pub struct MockHarness {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "webviz", derive(tsify_next::Tsify))]
-#[cfg_attr(feature = "webviz", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum TxGenPolicy {
     EveryNSteps { n: usize },
     OncePerView { prev_view: RefCell<Option<ViewNum>> },

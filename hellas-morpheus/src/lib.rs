@@ -44,9 +44,6 @@ pub mod test_harness;
 pub mod format;
 pub mod tracing_setup;
 
-#[cfg(feature = "webviz")]
-pub mod web_harness;
-
 pub use types::*;
 pub use process::*;
 pub use invariants::InvariantViolation;

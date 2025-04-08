@@ -7,17 +7,12 @@ use std::{
 use crate::{format::format_message, *};
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "webviz")]
-use tsify_next::Tsify;
-
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
 ///
 /// This struct implements the Algorithm 1 from the Morpheus pseudocode,
 /// maintaining all state required for processing messages, voting, and
 /// producing blocks according to the protocol specification.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(feature = "webviz", derive(Tsify))]
-#[cfg_attr(feature = "webviz", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct MorpheusProcess {
     /// Identity of this process (equivalent to p_i in the pseudocode)
     pub id: Identity,
@@ -173,7 +168,6 @@ pub struct MorpheusProcess {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(feature = "webviz", derive(Tsify))]
 /// Tracks votes for a particular data type and helps form quorums
 ///
 /// This is an implementation helper that tracks votes from different processes
