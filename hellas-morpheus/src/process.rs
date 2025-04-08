@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::state_tracking::PendingVotes;
 use crate::{format::format_message, *};
 use serde::{Deserialize, Serialize};
 
@@ -165,6 +166,8 @@ pub struct MorpheusProcess {
     pub genesis: Arc<Block>,
     pub genesis_qc: Arc<ThreshSigned<VoteData>>,
     pub ready_transactions: Vec<Transaction>,
+
+    pub pending_votes: PendingVotes,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -323,6 +326,7 @@ impl MorpheusProcess {
             genesis: Arc::new(genesis_block.data.clone()),
             genesis_qc: genesis_qc.clone(),
             ready_transactions: Vec::new(),
+            pending_votes: PendingVotes::default(),
         }
     }
 
@@ -396,50 +400,6 @@ impl MorpheusProcess {
                     "Processing valid block"
                 );
                 self.record_block(&block, to_send);
-                if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
-                    if block.data.key.type_ == BlockType::Lead && block.data.key.view == self.view_i
-                    {
-                        self.try_vote(1, &block.data.key, None, to_send);
-                    }
-                }
-                if block.data.key.type_ == BlockType::Tr
-                    && block.data.key.view == self.view_i
-                    && self
-                        .contains_lead_by_view
-                        .get(&self.view_i)
-                        .cloned()
-                        .unwrap_or(false)
-                    && self
-                        .unfinalized_lead_by_view
-                        .entry(self.view_i)
-                        .or_default()
-                        .is_empty()
-                    && self.tips.len() == 1
-                    && self.tips[0].for_which == block.data.key
-                    && self // FIXME: compare only against max_1qc? keep a tips of 1-QCs?
-                        .qcs
-                        .values()
-                        .filter(|qc| qc.data.z == 1)
-                        .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
-                {
-                    if self.try_vote(1, &block.data.key, None, to_send) {
-                        crate::tracing_setup::protocol_transition(
-                            &self.id,
-                            "throughput phase",
-                            &Phase::High,
-                            &Phase::Low,
-                            Some("1-voted for a transaction block"),
-                        );
-                        self.phase_i.insert(self.view_i, Phase::Low);
-                    }
-                }
-                if block.data.key.type_ == BlockType::Lead {
-                    self.contains_lead_by_view.insert(block.data.key.view, true);
-                    self.unfinalized_lead_by_view
-                        .entry(block.data.key.view)
-                        .or_default()
-                        .insert(block.data.key.clone());
-                }
             }
             Message::NewVote(vote_data) => {
                 if !vote_data.valid_signature() {
@@ -466,7 +426,7 @@ impl MorpheusProcess {
                 }
                 match self.end_views.record_vote(end_view.clone()) {
                     Ok(num_votes) => {
-                        if end_view.data > self.view_i && num_votes >= self.f + 1 {
+                        if end_view.data >= self.view_i && num_votes >= self.f + 1 {
                             self.send_msg(
                                 to_send,
                                 (
@@ -516,6 +476,9 @@ impl MorpheusProcess {
             );
         }
 
+        // Re-evaluate any pending voting decisions
+        self.reevaluate_pending_votes(to_send);
+
         true
     }
 
@@ -534,8 +497,13 @@ impl MorpheusProcess {
             Some(&format_message(&cause, false)),
         );
 
+        assert!(self.view_i < new_view);
+
         self.view_i = new_view;
         self.view_entry_time = self.current_time;
+
+        // View changed, we need to re-evaluate pending votes
+        self.pending_votes.dirty = true;
 
         self.send_msg(to_send, (cause, None));
 
@@ -566,6 +534,9 @@ impl MorpheusProcess {
                 Some(self.lead(new_view)),
             ),
         );
+
+        // Re-evaluate any pending voting decisions after view change
+        self.reevaluate_pending_votes(to_send);
     }
 
     /// Implements the "Complain" section from Algorithm 1

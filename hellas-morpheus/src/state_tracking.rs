@@ -1,10 +1,21 @@
 use std::{
     cmp::Ordering,
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::*;
+
+#[derive(Serialize, Deserialize, Default)]
+pub struct PendingVotes {
+    pub tr_1: BTreeMap<BlockKey, bool>,
+    pub tr_2: BTreeMap<BlockKey, bool>,
+    pub lead_1: BTreeMap<BlockKey, bool>,
+    pub lead_2: BTreeMap<BlockKey, bool>,
+    pub dirty: bool,
+}
 
 impl MorpheusProcess {
     pub fn try_vote(
@@ -65,7 +76,11 @@ impl MorpheusProcess {
                 true
             }
             Err(Duplicate) => {
-                tracing::warn!("Duplicate vote for {:?} from {:?}", vote_data.data, vote_data.author);
+                tracing::warn!(
+                    "Duplicate vote for {:?} from {:?}",
+                    vote_data.data,
+                    vote_data.author
+                );
                 false
             }
         }
@@ -194,45 +209,24 @@ impl MorpheusProcess {
                 .remove(&finalized.for_which);
             self.unfinalized.remove(&finalized.for_which);
             self.finalized.insert(finalized.for_which.clone(), true);
+
+            // When blocks are finalized, we may need to re-evaluate votes
+            self.pending_votes.dirty = true;
         }
 
         // Check if we need to vote for a leader block
-        if self.phase_i.entry(self.view_i).or_insert(Phase::High) == &Phase::High {
-            if qc.data.z == 1
-                && qc.data.for_which.type_ == BlockType::Lead
-                && qc.data.for_which.view == self.view_i
-            {
-                assert!(!self.try_vote(2, &qc.data.for_which, None, to_send));
-            }
+        if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Lead {
+            self.pending_votes
+                .lead_2
+                .insert(qc.data.for_which.clone(), true);
         }
 
-        // Check if we need to vote for a transaction block
-        if qc.data.z == 1
-            && self.tips.len() == 1
-            && self.tips[0] == qc.data
-            && self
-                .contains_lead_by_view
-                .get(&self.view_i)
-                .cloned()
-                .unwrap_or(false)
-            && self
-                .unfinalized_lead_by_view
-                .entry(self.view_i)
-                .or_default()
-                .is_empty()
-            && qc.data.for_which.type_ == BlockType::Tr
-            && self.max_height.0 <= qc.data.for_which.height
-        {
-            if self.try_vote(2, &qc.data.for_which, None, to_send) {
-                crate::tracing_setup::protocol_transition(
-                    &self.id,
-                    "throughput phase",
-                    &Phase::High,
-                    &Phase::Low,
-                    Some("2-voted for a transaction block"),
-                );
-                self.set_phase(Phase::Low);
-            }
+        // Instead of eagerly voting for transaction blocks, mark them as pending for evaluation
+        if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Tr {
+            self.pending_votes
+                .tr_2
+                .insert(qc.data.for_which.clone(), true);
+            self.pending_votes.dirty = true;
         }
     }
 
@@ -265,6 +259,24 @@ impl MorpheusProcess {
         let block_key = block.data.key.clone();
         assert_eq!(self.finalized.insert(block_key.clone(), false), None);
         assert_eq!(self.blocks.insert(block_key.clone(), block.clone()), None);
+
+        match block.data.key.type_ {
+            BlockType::Lead => {
+                self.contains_lead_by_view.insert(block.data.key.view, true);
+                self.unfinalized_lead_by_view
+                    .entry(block.data.key.view)
+                    .or_default()
+                    .insert(block.data.key.clone());
+                self.pending_votes
+                    .lead_1
+                    .insert(block.data.key.clone(), true);
+                self.pending_votes.dirty = true;
+            }
+            BlockType::Tr => {
+                self.pending_votes.tr_1.insert(block.data.key.clone(), true);
+            }
+            BlockType::Genesis => panic!("Why are we recording the genesis block?"),
+        }
 
         for qc in &block.data.prev {
             self.block_pointed_by
@@ -342,5 +354,165 @@ impl MorpheusProcess {
             }
         }
         false
+    }
+
+    pub fn set_phase(&mut self, phase: Phase) {
+        self.phase_i.insert(self.view_i, phase);
+    }
+
+    /// Re-evaluate all pending votes based on current state
+    pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
+        if !self.pending_votes.dirty {
+            return;
+        }
+
+        // Only process votes for the current view
+        let current_view = self.view_i;
+
+        let mut pending = std::mem::replace(&mut self.pending_votes, PendingVotes::default());
+
+        // First check global conditions for the current view
+        let contains_lead = self
+            .contains_lead_by_view
+            .get(&current_view)
+            .copied()
+            .unwrap_or(false);
+        let unfinalized_lead_empty = self
+            .unfinalized_lead_by_view
+            .get(&current_view)
+            .map_or(true, |set| set.is_empty());
+
+        // Only process transaction block votes if we have leader blocks and no unfinalized leader blocks
+        if contains_lead && unfinalized_lead_empty {
+            // Process transaction block votes (1-votes and 2-votes)
+            self.process_block_votes(
+                BlockType::Tr,
+                1,
+                &mut pending.tr_1,
+                |this, block_key| this.is_eligible_for_tr_1_vote(block_key),
+                Some("1-voted for a transaction block"),
+                to_send,
+            );
+
+            self.process_block_votes(
+                BlockType::Tr,
+                2,
+                &mut pending.tr_2,
+                |this, block_key| this.is_eligible_for_tr_2_vote(block_key),
+                Some("2-voted for a transaction block"),
+                to_send,
+            );
+        }
+
+        // Process leader block votes if we're still in high throughput phase
+        if self.phase_i.get(&current_view).unwrap_or(&Phase::High) == &Phase::High {
+            // Process leader block votes (1-votes and 2-votes)
+            self.process_block_votes(
+                BlockType::Lead,
+                1,
+                &mut pending.lead_1,
+                |_, block_key| block_key.view == current_view,
+                None,
+                to_send,
+            );
+
+            self.process_block_votes(
+                BlockType::Lead,
+                2,
+                &mut pending.lead_2,
+                |_, block_key| block_key.view == current_view,
+                None,
+                to_send,
+            );
+        }
+
+        pending.dirty = false;
+        self.pending_votes = pending;
+    }
+
+    /// Generic method to process pending votes for blocks
+    ///
+    /// This handles both transaction and leader blocks for both 1-votes and 2-votes
+    fn process_block_votes<F>(
+        &mut self,
+        block_type: BlockType,
+        vote_level: u8,
+        pending_votes: &mut BTreeMap<BlockKey, bool>,
+        eligibility_check: F,
+        phase_transition_reason: Option<&str>,
+        to_send: &mut Vec<(Message, Option<Identity>)>,
+    ) where
+        F: Fn(&Self, &BlockKey) -> bool,
+    {
+        let mut processed_keys = Vec::new();
+
+        for block_key in pending_votes.keys().cloned() {
+            // Check if this block is eligible for voting
+            if eligibility_check(self, &block_key) {
+                if self.try_vote(vote_level, &block_key, None, to_send) {
+                    // If we voted for a transaction block, transition to low throughput phase
+                    if block_type == BlockType::Tr && phase_transition_reason.is_some() {
+                        crate::tracing_setup::protocol_transition(
+                            &self.id,
+                            "throughput phase",
+                            &Phase::High,
+                            &Phase::Low,
+                            phase_transition_reason,
+                        );
+                        self.set_phase(Phase::Low);
+                    }
+                }
+                processed_keys.push(block_key);
+            }
+        }
+
+        // Remove processed keys
+        for key in processed_keys {
+            pending_votes.remove(&key);
+        }
+    }
+
+    /// Helper method to check if a transaction block is eligible for a 1-vote
+    fn is_eligible_for_tr_1_vote(&self, block_key: &BlockKey) -> bool {
+        // Check if this block is a single tip
+        let has_single_tip = self.tips.len() == 1
+            && self
+                .tips
+                .get(0)
+                .map_or(false, |tip| tip.for_which == *block_key);
+
+        if !has_single_tip || !self.blocks.contains_key(block_key) {
+            return false;
+        }
+
+        // Check if the block's 1-QC is valid
+        let block = self.blocks.get(block_key).unwrap();
+        self.qcs
+            .values()
+            .filter(|qc| qc.data.z == 1)
+            .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
+    }
+
+    /// Helper method to check if a transaction block is eligible for a 2-vote
+    fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
+        // Find the QC for this block
+        let qc_data_opt = self
+            .qcs
+            .keys()
+            .find(|q| q.for_which == *block_key && q.z == 1)
+            .cloned();
+
+        if let Some(qc_data) = qc_data_opt {
+            // Check if this QC is a single tip
+            let has_single_tip =
+                self.tips.len() == 1 && self.tips.get(0).map_or(false, |tip| tip == &qc_data);
+
+            // Check if there are no blocks with greater height
+            let no_higher_blocks = self.max_height.0 <= block_key.height;
+
+            has_single_tip && no_higher_blocks && block_key.type_ == BlockType::Tr
+        } else {
+            false
+        }
     }
 }
