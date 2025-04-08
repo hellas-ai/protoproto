@@ -190,7 +190,7 @@ impl MorpheusProcess {
     ///
     /// Returns Ok(()) if the block is valid, or the specific error that caused validation to fail
     pub fn block_valid(&self, block: &Signed<Block>) -> Result<(), BlockValidationError> {
-        if !block.is_valid() {
+        if !block.valid_signature() {
             return Err(BlockValidationError::InvalidSignature);
         }
         let block = &block.data;
@@ -231,7 +231,7 @@ impl MorpheusProcess {
                     },
                 );
             }
-            if prev != &*self.genesis_qc && !prev.is_valid() {
+            if prev != &*self.genesis_qc && !prev.valid_signature() {
                 return Err(BlockValidationError::InvalidPrevQcSignature);
             }
         }
@@ -249,7 +249,7 @@ impl MorpheusProcess {
             });
         }
 
-        if !block.one.is_valid() {
+        if !block.one.valid_signature() {
             return Err(BlockValidationError::InvalidOneQcSignature);
         }
 
@@ -352,7 +352,7 @@ impl MorpheusProcess {
                         });
                     }
 
-                    if !just.iter().all(|j| j.is_valid()) {
+                    if !just.iter().all(|j| j.valid_signature()) {
                         return Err(BlockValidationError::InvalidJustificationSignature);
                     }
 

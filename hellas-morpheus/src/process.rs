@@ -42,6 +42,7 @@ pub struct MorpheusProcess {
 
     /// Tracks the phase within each view (phase_i(v) in pseudocode)
     /// "Initially 0" for each view, represents high throughput (0) or low throughput (1) phase
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub phase_i: BTreeMap<ViewNum, Phase>,
 
     /// Total number of processes in the system
@@ -81,10 +82,12 @@ pub struct MorpheusProcess {
 
     /// Tracks view change messages
     /// Used to collect view v messages with 1-QCs sent to the leader
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
     /// Stores QCs indexed by their VoteData
     /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
 
     /// Tracks the maximum view seen and its associated VoteData
@@ -108,10 +111,12 @@ pub struct MorpheusProcess {
 
     /// Maps block keys to blocks (part of M_i in pseudocode)
     /// Implements part of "the set of all received messages"
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub blocks: BTreeMap<BlockKey, Arc<Signed<Block>>>,
 
     /// Tracks which blocks point to which other blocks
     /// Used to efficiently determine the DAG structure
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub block_pointed_by: BTreeMap<BlockKey, BTreeSet<BlockKey>>,
 
     /// Tracks unfinalized blocks with 2-QC
@@ -120,35 +125,43 @@ pub struct MorpheusProcess {
 
     /// Maps block keys to their finalization status
     /// Used to track which blocks have been finalized
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub finalized: BTreeMap<BlockKey, bool>,
 
     /// Maps block keys to their unfinalized QCs
     /// Used to track which QCs are not yet finalized
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub unfinalized: BTreeMap<BlockKey, BTreeSet<VoteData>>,
 
     /// Tracks whether we've seen a leader block for each view
     /// Used to implement logic that depends on leader blocks within a view
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub contains_lead_by_view: BTreeMap<ViewNum, bool>,
 
     /// Maps views to sets of unfinalized leader blocks
     /// Tracks which leader blocks are not yet finalized by view
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
 
     // === Performance optimization indexes ===
     /// Quick index to QCs by block type, author, and slot
     /// Enables O(1) lookup of QCs
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), Arc<ThreshSigned<VoteData>>>,
 
     /// Maps (type, author, view) to QCs for efficient retrieval
     /// Used to find QCs for a specific block type, author, and view
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<Arc<ThreshSigned<VoteData>>>>,
 
     /// Maps (type, view, author) to blocks for efficient retrieval
     /// Used to find blocks of a specific type, view, and author
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block>>>>,
 
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 
     /// All messages received by this process
@@ -166,9 +179,10 @@ pub struct MorpheusProcess {
 /// This is an implementation helper that tracks votes from different processes
 /// and determines when a quorum (n-f votes) has been reached.
 /// Used for implementing the collection of votes in the protocol.
-pub struct VoteTrack<T: Ord> {
+pub struct VoteTrack<T: Ord + Serialize + for<'d> Deserialize<'d> + 'static> {
     /// Maps vote data to a map of (voter identity -> signed vote)
     /// Ensures we only count one vote per process and track when we reach a quorum
+    #[serde(with = "serde_json_any_key::any_key_map")]
     pub votes: BTreeMap<T, BTreeMap<Identity, Arc<Signed<T>>>>,
 }
 
@@ -177,7 +191,7 @@ pub struct VoteTrack<T: Ord> {
 
 pub struct Duplicate;
 
-impl<T: Ord + Clone> VoteTrack<T> {
+impl<T: Ord + Clone + Serialize + for<'d> Deserialize<'d> + 'static> VoteTrack<T> {
     /// Records a new vote and returns the number of votes collected for this data
     ///
     /// This helps implement the quorum formation logic from the pseudocode:
@@ -434,13 +448,13 @@ impl MorpheusProcess {
                 }
             }
             Message::NewVote(vote_data) => {
-                if !vote_data.is_valid() {
+                if !vote_data.valid_signature() {
                     return false;
                 }
                 self.record_vote(&vote_data, to_send);
             }
             Message::QC(qc) => {
-                if !qc.is_valid() {
+                if !qc.valid_signature() {
                     return false;
                 }
                 self.record_qc(&qc, to_send);
@@ -453,7 +467,7 @@ impl MorpheusProcess {
                 }
             }
             Message::EndView(end_view) => {
-                if !end_view.is_valid() {
+                if !end_view.valid_signature() {
                     return false;
                 }
                 match self.end_views.record_vote(end_view.clone()) {
@@ -475,7 +489,7 @@ impl MorpheusProcess {
                 }
             }
             Message::EndViewCert(end_view_cert) => {
-                if !end_view_cert.is_valid() {
+                if !end_view_cert.valid_signature() {
                     return false;
                 }
                 let view = end_view_cert.data;
@@ -484,7 +498,7 @@ impl MorpheusProcess {
                 }
             }
             Message::StartView(start_view) => {
-                if !start_view.is_valid() {
+                if !start_view.valid_signature() {
                     return false;
                 }
                 if start_view.data.qc.data.z != 1 {

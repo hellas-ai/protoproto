@@ -1,6 +1,92 @@
+use hellas_morpheus::{test_harness::MockHarness, Block, MorpheusProcess};
 use leptos::prelude::*;
 
 /*
+
+pub enum BlockType {
+    Genesis,
+    Lead,
+    Tr,
+}
+
+pub struct ThreshSignature {}
+
+pub struct Signature {}
+
+pub enum Transaction {
+    Opaque(Vec<u8>),
+}
+
+pub struct ViewNum(pub i64);
+
+pub struct SlotNum(pub u64);
+
+pub struct Identity(pub u64);
+
+pub struct BlockHash(pub u64);
+
+pub struct Signed<T> {
+    pub data: T,
+    pub author: Identity,
+    pub signature: Signature,
+}
+
+pub struct ThreshSigned<T> {
+    pub data: T,
+    pub signature: ThreshSignature,
+}
+pub struct BlockKey {
+    pub type_: BlockType,
+    pub view: ViewNum,
+    pub height: usize,
+    pub author: Option<Identity>, // TODO: refactor genesis handling to make this mandatory
+    pub slot: SlotNum,
+    pub hash: Option<BlockHash>,
+}
+
+pub struct VoteData {
+    pub z: u8,
+    pub for_which: BlockKey,
+}
+
+pub struct StartView {
+    /// The new view number
+    pub view: ViewNum,
+    
+    /// The maximal 1-QC seen by this process
+    /// This is used by the new leader to determine which blocks to build upon
+    pub qc: ThreshSigned<VoteData>,
+}
+
+pub enum BlockData {
+    Genesis,
+    Tr {
+        transactions: Vec<Transaction>,
+    },
+    Lead {
+        justification: Vec<Signed<StartView>>,
+    },
+}
+
+pub struct Block {
+    pub key: BlockKey,
+    pub prev: Vec<ThreshSigned<VoteData>>,
+    pub one: ThreshSigned<VoteData>,
+    pub data: BlockData,
+}
+pub enum Message {
+    Block(Arc<Signed<Block>>),
+    NewVote(Arc<Signed<VoteData>>),
+    QC(Arc<ThreshSigned<VoteData>>),
+    EndView(Arc<Signed<ViewNum>>),
+    EndViewCert(Arc<ThreshSigned<ViewNum>>),
+    StartView(Arc<Signed<StartView>>),
+}
+
+pub enum Phase {
+    High = 0,
+    Low = 1,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct MorpheusProcess {
@@ -144,17 +230,37 @@ pub struct MorpheusProcess {
     pub ready_transactions: Vec<Transaction>,
 }
 
- */
-/// A parameterized incrementing button
-#[component]
-pub fn Button(#[prop(default = 1)] increment: i32) -> impl IntoView {
-    let (count, set_count) = signal(0);
-    view! {
-        <button on:click=move |_| {
-            set_count(count() + increment)
-        }>
+pub struct MockHarness {
+    /// The current logical time of the simulation
+    pub time: u128,
 
-            "Click me: " {count}
-        </button>
+    /// The processes participating in the simulation
+    pub processes: BTreeMap<Identity, MorpheusProcess>,
+
+    /// Messages that are waiting to be delivered
+    /// Each message is paired with its sender and destination (None means broadcast)
+    pub pending_messages: VecDeque<(Message, Identity, Option<Identity>)>,
+
+    /// Time increment to use when advancing time
+    pub time_step: u128,
+
+    pub steps: usize,
+}
+
+ */
+
+ #[component]
+ pub fn Block(block: Block) -> impl IntoView {
+    view! {
+
+    }
+ }
+
+#[component]
+pub fn ProcessViewer(process: MockHarness) -> impl IntoView {
+    let all_blocks = process.processes.values().flat_map(|p| p.blocks.values()).collect::<Vec<_>>();
+
+    view! {
+
     }
 }

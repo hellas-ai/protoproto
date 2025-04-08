@@ -64,13 +64,13 @@ pub struct ThreshSigned<T> {
 }
 
 impl<T> ThreshSigned<T> {
-    pub fn is_valid(&self) -> bool {
+    pub fn valid_signature(&self) -> bool {
         true
     }
 }
 
 impl<T> Signed<T> {
-    pub fn is_valid(&self) -> bool {
+    pub fn valid_signature(&self) -> bool {
         true
     }
 }

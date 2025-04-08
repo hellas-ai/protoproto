@@ -33,15 +33,11 @@ impl MorpheusProcess {
         has_transactions
     }
 
-    // MakeTrBlock - Efficiently creates a transaction block
     fn make_tr_block(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        // 1. Initialize block properties
         let slot = self.slot_i_tr;
         let mut prev_qcs = Vec::new();
 
-        // 2. Set block's previous pointer - efficiently lookup previous QC
         if slot.0 > 0 {
-            // Use our index for direct lookup
             if let Some(prev_qc) =
                 self.qc_by_slot
                     .get(&(BlockType::Tr, self.id.clone(), SlotNum(slot.0 - 1)))
@@ -52,7 +48,7 @@ impl MorpheusProcess {
             prev_qcs.push(self.genesis_qc.clone());
         }
 
-        // 3. If there's a single tip, point to it as well
+        // If there's a single tip, point to it as well
         if self.tips.len() == 1 {
             let tip = &self.tips[0];
             let tip_qc = self.qcs.get(tip).unwrap();
@@ -66,7 +62,6 @@ impl MorpheusProcess {
             }
         }
 
-        // 4. Calculate block height
         let height = prev_qcs
             .iter()
             .map(|qc| qc.data.for_which.height)
@@ -74,10 +69,8 @@ impl MorpheusProcess {
             .unwrap_or(0)
             + 1;
 
-        // 5. Use max_1qc which is already efficiently tracked
         let max_1qc = self.max_1qc.clone();
 
-        // Create block key
         let block_key = BlockKey {
             type_: BlockType::Tr,
             view: self.view_i,
@@ -96,14 +89,12 @@ impl MorpheusProcess {
             },
         };
 
-        // 6. Sign and send block
         let signed_block = Arc::new(Signed {
             data: block.clone(),
             author: self.id.clone(),
             signature: Signature {},
         });
 
-        // Track block creation with tracing for visualization
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
         crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
 
@@ -111,12 +102,10 @@ impl MorpheusProcess {
         self.send_msg(to_send, (Message::Block(signed_block.clone()), None));
     }
 
-    // LeaderReady - Efficiently determines if leader is ready to produce a block
     fn leader_ready(&self) -> bool {
         let view = self.view_i;
         let slot = self.slot_i_lead;
 
-        // Case 1: First leader block of the view - efficient lookup using our index
         let has_produced_lead_block = self
             .produced_lead_in_view
             .get(&view)
@@ -124,7 +113,6 @@ impl MorpheusProcess {
             .unwrap_or(false);
 
         if !has_produced_lead_block {
-            // Check if we have received enough view messages
             let has_enough_view_messages = self
                 .start_views
                 .get(&view)
@@ -145,9 +133,7 @@ impl MorpheusProcess {
             return has_enough_view_messages && has_prev_qc;
         }
 
-        // Case 2: Subsequent leader blocks in the view
         if has_produced_lead_block && slot.0 > 0 {
-            // Efficiently lookup 1-QC for previous leader block using our index
             let prev_qcs = self
                 .qc_by_view
                 .get(&(BlockType::Lead, self.id.clone(), view));
@@ -162,20 +148,16 @@ impl MorpheusProcess {
         false
     }
 
-    // MakeLeaderBlock - Efficiently creates a leader block
     fn make_leader_block(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        // 1. Initialize block properties
         let slot = self.slot_i_lead;
         let view = self.view_i;
 
-        // 2. Initially set prev to tips - already efficiently managed
         let mut prev_qcs: Vec<Arc<ThreshSigned<VoteData>>> = self
             .tips
             .iter()
             .filter_map(|tip| self.qcs.get(tip).cloned())
             .collect();
 
-        // 3. Add pointer to previous leader block if applicable - efficient lookup
         if slot.0 > 0 {
             if let Some(prev_qc) =
                 self.qc_by_slot
@@ -190,7 +172,6 @@ impl MorpheusProcess {
             }
         }
 
-        // 4. Calculate block height
         let height = prev_qcs
             .iter()
             .map(|qc| qc.data.for_which.height)
@@ -198,7 +179,6 @@ impl MorpheusProcess {
             .unwrap_or(0)
             + 1;
 
-        // Check if this is the first leader block for this view - efficient lookup
         let has_produced_lead_block = self
             .produced_lead_in_view
             .get(&view)
@@ -206,14 +186,12 @@ impl MorpheusProcess {
             .unwrap_or(false);
 
         let (one_qc, justification) = if !has_produced_lead_block {
-            // 5a. For first leader block, include justification and set 1-QC
             let view_messages = self.start_views.get(&view).cloned().unwrap_or_default();
             let view_messages = view_messages
                 .into_iter()
                 .map(|msg| Signed::clone(&msg))
                 .collect::<Vec<_>>();
 
-            // Find max 1-QC from view messages
             let max_qc = view_messages
                 .iter()
                 .map(|msg| &msg.data.qc)
@@ -223,7 +201,6 @@ impl MorpheusProcess {
 
             (max_qc, view_messages)
         } else {
-            // 6. For subsequent blocks, efficiently lookup 1-QC
             let prev_qcs = self
                 .qc_by_view
                 .get(&(BlockType::Lead, self.id.clone(), view));
@@ -238,7 +215,6 @@ impl MorpheusProcess {
             (prev_leader_qc, vec![])
         };
 
-        // Create block key
         let block_key = BlockKey {
             type_: BlockType::Lead,
             view,
@@ -248,7 +224,6 @@ impl MorpheusProcess {
             hash: Some(BlockHash(self.slot_i_lead.0)),
         };
 
-        // Create block
         let block = Block {
             key: block_key.clone(),
             prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
@@ -258,7 +233,6 @@ impl MorpheusProcess {
 
         crate::tracing_setup::block_created(&self.id, "leader", &block.key);
 
-        // 7. Sign and send block
         let signed_block = Arc::new(Signed {
             data: block,
             author: self.id.clone(),
@@ -268,7 +242,6 @@ impl MorpheusProcess {
         self.record_block(&signed_block, to_send);
         self.send_msg(to_send, (Message::Block(signed_block), None));
 
-        // 8. Update leader slot
         self.slot_i_lead = SlotNum(self.slot_i_lead.0 + 1);
     }
 }
