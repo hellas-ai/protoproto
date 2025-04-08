@@ -399,7 +399,7 @@ impl MorpheusProcess {
                     view = ?block.data.key.view,
                     "Processing valid block"
                 );
-                self.record_block(&block, to_send);
+                self.record_block(&block);
             }
             Message::NewVote(vote_data) => {
                 if !vote_data.valid_signature() {
@@ -411,7 +411,7 @@ impl MorpheusProcess {
                 if !qc.valid_signature() {
                     return false;
                 }
-                self.record_qc(&qc, to_send);
+                self.record_qc(&qc);
                 if self.max_view.0 > self.view_i {
                     self.end_view(
                         Message::QC(self.qcs.get(&self.max_view.1).cloned().unwrap()),
@@ -458,7 +458,7 @@ impl MorpheusProcess {
                 if start_view.data.qc.data.z != 1 {
                     return false;
                 }
-                self.record_qc(&Arc::new(start_view.data.qc.clone()), to_send);
+                self.record_qc(&Arc::new(start_view.data.qc.clone()));
                 self.start_views
                     .entry(start_view.data.view)
                     .or_insert(Vec::new())

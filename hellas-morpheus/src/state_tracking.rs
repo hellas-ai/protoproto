@@ -71,7 +71,7 @@ impl MorpheusProcess {
                         self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
                         self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
                     }
-                    self.record_qc(&quorum_formed, to_send);
+                    self.record_qc(&quorum_formed);
                 }
                 true
             }
@@ -99,11 +99,7 @@ impl MorpheusProcess {
     ///
     /// It's not clear that this is correct, and it may even be slower than a
     /// more naive approach if the set sizes were kept small.
-    pub fn record_qc(
-        &mut self,
-        qc: &Arc<ThreshSigned<VoteData>>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) {
+    pub fn record_qc(&mut self, qc: &Arc<ThreshSigned<VoteData>>) {
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
         if self.qcs.contains_key(&qc.data) {
@@ -237,11 +233,7 @@ impl MorpheusProcess {
     /// updated and specifies the set of all received messages."
     ///
     /// It will also record any QCs that are used as pointers in the block.
-    pub fn record_block(
-        &mut self,
-        block: &Arc<Signed<Block>>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) {
+    pub fn record_block(&mut self, block: &Arc<Signed<Block>>) {
         if block.data.key.height > self.max_height.0 {
             self.max_height = (block.data.key.height, block.data.key.clone());
         }
@@ -274,6 +266,7 @@ impl MorpheusProcess {
             }
             BlockType::Tr => {
                 self.pending_votes.tr_1.insert(block.data.key.clone(), true);
+                self.pending_votes.dirty = true;
             }
             BlockType::Genesis => panic!("Why are we recording the genesis block?"),
         }
@@ -291,7 +284,7 @@ impl MorpheusProcess {
             .chain(Some(&block.data.one).into_iter())
         {
             // TODO: these Arc are temporary....
-            self.record_qc(&Arc::new(qc.clone()), to_send);
+            self.record_qc(&Arc::new(qc.clone()));
         }
     }
 
@@ -386,7 +379,6 @@ impl MorpheusProcess {
         if contains_lead && unfinalized_lead_empty {
             // Process transaction block votes (1-votes and 2-votes)
             self.process_block_votes(
-                BlockType::Tr,
                 1,
                 &mut pending.tr_1,
                 |this, block_key| this.is_eligible_for_tr_1_vote(block_key),
@@ -395,7 +387,6 @@ impl MorpheusProcess {
             );
 
             self.process_block_votes(
-                BlockType::Tr,
                 2,
                 &mut pending.tr_2,
                 |this, block_key| this.is_eligible_for_tr_2_vote(block_key),
@@ -408,7 +399,6 @@ impl MorpheusProcess {
         if self.phase_i.get(&current_view).unwrap_or(&Phase::High) == &Phase::High {
             // Process leader block votes (1-votes and 2-votes)
             self.process_block_votes(
-                BlockType::Lead,
                 1,
                 &mut pending.lead_1,
                 |_, block_key| block_key.view == current_view,
@@ -417,7 +407,6 @@ impl MorpheusProcess {
             );
 
             self.process_block_votes(
-                BlockType::Lead,
                 2,
                 &mut pending.lead_2,
                 |_, block_key| block_key.view == current_view,
@@ -435,7 +424,6 @@ impl MorpheusProcess {
     /// This handles both transaction and leader blocks for both 1-votes and 2-votes
     fn process_block_votes<F>(
         &mut self,
-        block_type: BlockType,
         vote_level: u8,
         pending_votes: &mut BTreeMap<BlockKey, bool>,
         eligibility_check: F,
@@ -451,7 +439,7 @@ impl MorpheusProcess {
             if eligibility_check(self, &block_key) {
                 if self.try_vote(vote_level, &block_key, None, to_send) {
                     // If we voted for a transaction block, transition to low throughput phase
-                    if block_type == BlockType::Tr && phase_transition_reason.is_some() {
+                    if block_key.type_ == BlockType::Tr && phase_transition_reason.is_some() {
                         crate::tracing_setup::protocol_transition(
                             &self.id,
                             "throughput phase",

@@ -98,7 +98,7 @@ impl MorpheusProcess {
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
         crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
 
-        self.record_block(&signed_block, to_send);
+        self.record_block(&signed_block);
         self.send_msg(to_send, (Message::Block(signed_block.clone()), None));
     }
 
@@ -239,7 +239,7 @@ impl MorpheusProcess {
             signature: Signature {},
         });
 
-        self.record_block(&signed_block, to_send);
+        self.record_block(&signed_block);
         self.send_msg(to_send, (Message::Block(signed_block), None));
 
         self.slot_i_lead = SlotNum(self.slot_i_lead.0 + 1);
