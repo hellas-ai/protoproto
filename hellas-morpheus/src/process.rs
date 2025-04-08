@@ -58,7 +58,7 @@ pub struct MorpheusProcess {
     // === Implementation-specific auxiliary variables ===
     /// Tracks end-view messages for view changes
     /// Used to form (v+1)-certificates when f+1 end-view v messages are collected
-    pub end_views: VoteTrack<ViewNum>,
+    pub end_views: QuorumTrack<ViewNum>,
 
     /// Tracks which 0-QCs have been sent to avoid duplicates
     /// Implements "p_i has not previously sent a 0-QC for b to other processors"
@@ -78,7 +78,7 @@ pub struct MorpheusProcess {
     // === State tracking fields (corresponding to M_i and Q_i in pseudocode) ===
     /// Tracks votes for each VoteData to form quorums
     /// Part of M_i in pseudocode - "the set of all received messages"
-    pub vote_tracker: VoteTrack<VoteData>,
+    pub vote_tracker: QuorumTrack<VoteData>,
 
     /// Tracks view change messages
     /// Used to collect view v messages with 1-QCs sent to the leader
@@ -179,7 +179,7 @@ pub struct MorpheusProcess {
 /// This is an implementation helper that tracks votes from different processes
 /// and determines when a quorum (n-f votes) has been reached.
 /// Used for implementing the collection of votes in the protocol.
-pub struct VoteTrack<T: Ord + Serialize + for<'d> Deserialize<'d> + 'static> {
+pub struct QuorumTrack<T: Ord + Serialize + for<'d> Deserialize<'d> + 'static> {
     /// Maps vote data to a map of (voter identity -> signed vote)
     /// Ensures we only count one vote per process and track when we reach a quorum
     #[serde(with = "serde_json_any_key::any_key_map")]
@@ -191,7 +191,7 @@ pub struct VoteTrack<T: Ord + Serialize + for<'d> Deserialize<'d> + 'static> {
 
 pub struct Duplicate;
 
-impl<T: Ord + Clone + Serialize + for<'d> Deserialize<'d> + 'static> VoteTrack<T> {
+impl<T: Ord + Clone + Serialize + for<'d> Deserialize<'d> + 'static> QuorumTrack<T> {
     /// Records a new vote and returns the number of votes collected for this data
     ///
     /// This helps implement the quorum formation logic from the pseudocode:
@@ -262,7 +262,7 @@ impl MorpheusProcess {
             delta: 10, // 10 ... "units"
 
             // Auxiliary fields
-            end_views: VoteTrack {
+            end_views: QuorumTrack {
                 votes: BTreeMap::new(),
             },
             zero_qcs_sent: BTreeSet::new(),
@@ -270,7 +270,7 @@ impl MorpheusProcess {
             view_entry_time: 0,
             current_time: 0,
 
-            vote_tracker: VoteTrack {
+            vote_tracker: QuorumTrack {
                 votes: BTreeMap::new(),
             },
             start_views: BTreeMap::new(),

@@ -202,7 +202,7 @@ impl MorpheusProcess {
                 && qc.data.for_which.type_ == BlockType::Lead
                 && qc.data.for_which.view == self.view_i
             {
-                self.try_vote(2, &qc.data.for_which, None, to_send);
+                assert!(!self.try_vote(2, &qc.data.for_which, None, to_send));
             }
         }
 
@@ -231,7 +231,7 @@ impl MorpheusProcess {
                     &Phase::Low,
                     Some("2-voted for a transaction block"),
                 );
-                self.phase_i.insert(self.view_i, Phase::Low);
+                self.set_phase(Phase::Low);
             }
         }
     }
