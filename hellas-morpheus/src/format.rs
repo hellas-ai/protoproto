@@ -36,38 +36,40 @@ pub fn format_block_hash(hash: &BlockHash) -> String {
 /// Format a BlockKey in a concise way
 pub fn format_block_key(key: &BlockKey) -> String {
     let mut result = format_block_type(&key.type_);
-    
+
     match key.type_ {
         BlockType::Genesis => result.push_str("[Genesis]"),
         _ => {
             write!(
-                result, 
+                result,
                 "[{},{},h{}",
                 format_view_num(&key.view),
                 format_slot_num(&key.slot),
                 key.height
-            ).unwrap();
-            
+            )
+            .unwrap();
+
             if let Some(author) = &key.author {
                 write!(result, ",{}", format_identity(author)).unwrap();
             }
-            
+
             if let Some(hash) = &key.hash {
                 write!(result, ",{}", format_block_hash(hash)).unwrap();
             }
-            
+
             result.push(']');
         }
     }
-    
+
     result
 }
 
 /// Format a VoteData in a concise way
 pub fn format_vote_data(vote_data: &VoteData, verbose: bool) -> String {
     if verbose {
-        format!("VoteData{{ z: {}, for_which: {} }}", 
-            vote_data.z, 
+        format!(
+            "VoteData{{ z: {}, for_which: {} }}",
+            vote_data.z,
             format_block_key(&vote_data.for_which)
         )
     } else {
@@ -76,14 +78,20 @@ pub fn format_vote_data(vote_data: &VoteData, verbose: bool) -> String {
 }
 
 /// Format a signed value in a concise way
-pub fn format_signed<T>(signed: &Signed<T>, value_formatter: impl Fn(&T) -> String, verbose: bool) -> String {
+pub fn format_signed<T>(
+    signed: &Signed<T>,
+    value_formatter: impl Fn(&T) -> String,
+    verbose: bool,
+) -> String {
     if verbose {
-        format!("Signed{{ data: {}, author: {} }}", 
+        format!(
+            "Signed{{ data: {}, author: {} }}",
             value_formatter(&signed.data),
             format_identity(&signed.author)
         )
     } else {
-        format!("{}[{}]", 
+        format!(
+            "{}[{}]",
             value_formatter(&signed.data),
             format_identity(&signed.author)
         )
@@ -91,7 +99,11 @@ pub fn format_signed<T>(signed: &Signed<T>, value_formatter: impl Fn(&T) -> Stri
 }
 
 /// Format a threshold signed value in a concise way
-pub fn format_thresh_signed<T>(signed: &ThreshSigned<T>, value_formatter: impl Fn(&T) -> String, verbose: bool) -> String {
+pub fn format_thresh_signed<T>(
+    signed: &ThreshSigned<T>,
+    value_formatter: impl Fn(&T) -> String,
+    verbose: bool,
+) -> String {
     if verbose {
         format!("ThreshSigned{{ data: {} }}", value_formatter(&signed.data))
     } else {
@@ -103,13 +115,13 @@ pub fn format_thresh_signed<T>(signed: &ThreshSigned<T>, value_formatter: impl F
 pub fn format_start_view(start_view: &StartView, verbose: bool) -> String {
     if verbose {
         format!(
-            "StartView{{ view: {}, qc: {} }}", 
+            "StartView{{ view: {}, qc: {} }}",
             format_view_num(&start_view.view),
             format_thresh_signed(&start_view.qc, |vd| format_vote_data(vd, false), false)
         )
     } else {
         format!(
-            "Start({},qc:{})", 
+            "Start({},qc:{})",
             format_view_num(&start_view.view),
             format_vote_data(&start_view.qc.data, false)
         )
@@ -122,7 +134,8 @@ pub fn format_block_data(data: &BlockData, verbose: bool) -> String {
         BlockData::Genesis => "Genesis".to_string(),
         BlockData::Tr { transactions } => {
             if verbose {
-                let tx_strs: Vec<_> = transactions.iter()
+                let tx_strs: Vec<_> = transactions
+                    .iter()
                     .map(|tx| format_transaction(tx, false))
                     .collect();
                 format!("Tr{{ transactions: [{}] }}", tx_strs.join(", "))
@@ -132,7 +145,8 @@ pub fn format_block_data(data: &BlockData, verbose: bool) -> String {
         }
         BlockData::Lead { justification } => {
             if verbose {
-                let just_strs: Vec<_> = justification.iter()
+                let just_strs: Vec<_> = justification
+                    .iter()
                     .map(|j| format_signed(j, |sv| format_start_view(sv, false), false))
                     .collect();
                 format!("Lead{{ justification: [{}] }}", just_strs.join(", "))
@@ -162,7 +176,9 @@ pub fn format_block(block: &Block, verbose: bool) -> String {
         format!(
             "Block{{ key: {}, prev: [{}], one: {}, data: {} }}",
             format_block_key(&block.key),
-            block.prev.iter()
+            block
+                .prev
+                .iter()
                 .map(|qc| format_thresh_signed(qc, |vd| format_vote_data(vd, false), false))
                 .collect::<Vec<_>>()
                 .join(", "),
@@ -184,16 +200,23 @@ pub fn format_message(message: &Message, verbose: bool) -> String {
     match message {
         Message::Block(signed_block) => {
             if verbose {
-                format!("Block({})", format_signed(signed_block, |b| format_block(b, true), true))
+                format!(
+                    "Block({})",
+                    format_signed(signed_block, |b| format_block(b, true), true)
+                )
             } else {
                 format!("Block({})", format_block_key(&signed_block.data.key))
             }
         }
         Message::NewVote(vote) => {
             if verbose {
-                format!("NewVote({})", format_signed(vote, |vd| format_vote_data(vd, true), true))
+                format!(
+                    "NewVote({})",
+                    format_signed(vote, |vd| format_vote_data(vd, true), true)
+                )
             } else {
-                format!("Vote({},{})", 
+                format!(
+                    "Vote({},{})",
                     format_vote_data(&vote.data, false),
                     format_identity(&vote.author)
                 )
@@ -201,16 +224,23 @@ pub fn format_message(message: &Message, verbose: bool) -> String {
         }
         Message::QC(qc) => {
             if verbose {
-                format!("QC({})", format_thresh_signed(qc, |vd| format_vote_data(vd, true), true))
+                format!(
+                    "QC({})",
+                    format_thresh_signed(qc, |vd| format_vote_data(vd, true), true)
+                )
             } else {
                 format!("QC({})", format_vote_data(&qc.data, false))
             }
         }
         Message::EndView(view) => {
             if verbose {
-                format!("EndView({})", format_signed(view, |v| format_view_num(v), true))
+                format!(
+                    "EndView({})",
+                    format_signed(view, |v| format_view_num(v), true)
+                )
             } else {
-                format!("EndView({},{})",
+                format!(
+                    "EndView({},{})",
                     format_view_num(&view.data),
                     format_identity(&view.author)
                 )
@@ -218,16 +248,23 @@ pub fn format_message(message: &Message, verbose: bool) -> String {
         }
         Message::EndViewCert(cert) => {
             if verbose {
-                format!("EndViewCert({})", format_thresh_signed(cert, |v| format_view_num(v), true))
+                format!(
+                    "EndViewCert({})",
+                    format_thresh_signed(cert, |v| format_view_num(v), true)
+                )
             } else {
                 format!("EndViewCert({})", format_view_num(&cert.data))
             }
         }
         Message::StartView(start_view) => {
             if verbose {
-                format!("StartView({})", format_signed(start_view, |sv| format_start_view(sv, true), true))
+                format!(
+                    "StartView({})",
+                    format_signed(start_view, |sv| format_start_view(sv, true), true)
+                )
             } else {
-                format!("StartView({},{})",
+                format!(
+                    "StartView({},{})",
                     format_view_num(&start_view.data.view),
                     format_identity(&start_view.author)
                 )
@@ -272,11 +309,14 @@ macro_rules! vote_log {
 #[macro_export]
 macro_rules! qc_log {
     ($qc:expr) => {
-        println!("[QC] {}", $crate::format::format_thresh_signed(
-            $qc, 
-            |vd| $crate::format::format_vote_data(vd, false), 
-            false
-        ))
+        println!(
+            "[QC] {}",
+            $crate::format::format_thresh_signed(
+                $qc,
+                |vd| $crate::format::format_vote_data(vd, false),
+                false
+            )
+        )
     };
 }
 
@@ -288,4 +328,4 @@ macro_rules! message_log {
     ($msg:expr, true) => {
         println!("[MSG] {}", $crate::format::format_message($msg, true))
     };
-} 
+}

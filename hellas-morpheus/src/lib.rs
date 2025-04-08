@@ -33,18 +33,18 @@
 //! - **Observes relation**: Defines the DAG structure and block ordering
 //! - **View changes**: Allow progress when a leader is faulty
 
-mod types;
-mod process;
-mod invariants;
-mod state_tracking;
 mod block_production;
 mod block_validation;
+mod invariants;
+mod process;
+mod state_tracking;
+mod types;
 
-pub mod test_harness;
 pub mod format;
+pub mod test_harness;
 pub mod tracing_setup;
 
-pub use types::*;
-pub use process::*;
-pub use invariants::InvariantViolation;
 pub use block_validation::BlockValidationError;
+pub use invariants::InvariantViolation;
+pub use process::*;
+pub use types::*;

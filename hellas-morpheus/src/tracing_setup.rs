@@ -7,11 +7,11 @@ pub fn register_process(id: &crate::Identity, n: usize, f: usize) {
 
 /// Track protocol transitions such as view changes
 pub fn protocol_transition(
-    process_id: &crate::Identity, 
-    transition_type: &str, 
-    from: impl std::fmt::Debug, 
+    process_id: &crate::Identity,
+    transition_type: &str,
+    from: impl std::fmt::Debug,
     to: impl std::fmt::Debug,
-    reason: Option<&str>
+    reason: Option<&str>,
 ) {
     if let Some(reason) = reason {
         info!(
@@ -60,11 +60,7 @@ pub fn message_sent(
 }
 
 /// Track block creation events
-pub fn block_created(
-    author: &crate::Identity,
-    block_type: &str,
-    block: impl std::fmt::Debug,
-) {
+pub fn block_created(author: &crate::Identity, block_type: &str, block: impl std::fmt::Debug) {
     info!(
         author = ?author,
         block_type = block_type,
@@ -74,11 +70,7 @@ pub fn block_created(
 }
 
 /// Track QC formation events
-pub fn qc_formed(
-    process_id: &crate::Identity,
-    qc_type: u8,
-    qc: impl std::fmt::Debug,
-) {
+pub fn qc_formed(process_id: &crate::Identity, qc_type: u8, qc: impl std::fmt::Debug) {
     info!(
         process_id = ?process_id,
         qc_type = qc_type,
@@ -88,10 +80,7 @@ pub fn qc_formed(
 }
 
 /// Track block finalization events
-pub fn block_finalized(
-    process_id: &crate::Identity,
-    block_key: impl std::fmt::Debug,
-) {
+pub fn block_finalized(process_id: &crate::Identity, block_key: impl std::fmt::Debug) {
     info!(
         process_id = ?process_id,
         block_key = ?block_key,
@@ -111,4 +100,4 @@ pub fn protocol_error(
         details = ?details,
         "Protocol error occurred"
     );
-} 
+}

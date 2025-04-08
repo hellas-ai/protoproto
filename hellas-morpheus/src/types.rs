@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use serde::{Serialize, Deserialize};
 use crate::format;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum BlockType {
@@ -117,7 +117,7 @@ impl VoteData {
 pub struct StartView {
     /// The new view number
     pub view: ViewNum,
-    
+
     /// The maximal 1-QC seen by this process
     /// This is used by the new leader to determine which blocks to build upon
     pub qc: ThreshSigned<VoteData>,
@@ -147,7 +147,6 @@ impl std::fmt::Debug for Block {
         write!(f, "{}", format::format_block(self, true))
     }
 }
-
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Message {
