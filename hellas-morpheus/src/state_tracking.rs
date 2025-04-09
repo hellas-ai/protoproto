@@ -170,7 +170,6 @@ impl MorpheusProcess {
                 author: self.id.clone(),
                 signature: Signature {},
             });
-            self.record_vote(&voted, to_send);
             self.send_msg(to_send, (Message::NewVote(voted.clone()), target));
             true
         } else {
