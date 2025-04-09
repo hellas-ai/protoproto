@@ -342,7 +342,7 @@ impl MorpheusProcess {
                     let mut just: Vec<Signed<StartView>> = justification.clone();
                     just.sort_by(|m1, m2| m1.author.cmp(&m2.author));
 
-                    if just.len() != self.n - self.f {
+                    if just.len() < self.n - self.f {
                         return Err(BlockValidationError::InvalidJustificationSize {
                             size: just.len(),
                             expected: self.n - self.f,

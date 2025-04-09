@@ -218,7 +218,7 @@ fn test_basic_txgen() {
     );
     // 51 blocks = 30 blocks from p3 + 20 blocks from p2 + 1 genesis block
     // where are the leader blocks?
-    assert_ne!(
+    assert_eq!(
         harness
             .processes
             .get(&Identity(2))
@@ -226,7 +226,7 @@ fn test_basic_txgen() {
             .index
             .blocks
             .len(),
-        51
+        10 
     );
 }
 

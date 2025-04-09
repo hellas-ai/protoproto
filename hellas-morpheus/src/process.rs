@@ -319,7 +319,7 @@ impl MorpheusProcess {
                 }
                 match self.end_views.record_vote(end_view.clone()) {
                     Ok(num_votes) => {
-                        if end_view.data > self.view_i && num_votes >= self.f + 1 {
+                        if end_view.data >= self.view_i && num_votes >= self.f + 1 {
                             self.send_msg(
                                 to_send,
                                 (
@@ -394,6 +394,7 @@ impl MorpheusProcess {
 
         self.view_i = new_view;
         self.view_entry_time = self.current_time;
+        self.phase_i.insert(new_view, Phase::High);
 
         // View changed, we need to re-evaluate pending votes
         self.pending_votes.entry(new_view).or_default().dirty = true;

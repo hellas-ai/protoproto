@@ -70,6 +70,7 @@ impl MockHarness {
         let mut made_progress = false;
 
         let mut to_send = Vec::new();
+        let mut next_round = Vec::new();
         // Process all the messages from last round
         while !self.pending_messages.is_empty() {
             let (message, sender, dest) = self.pending_messages.pop_front().unwrap();
@@ -86,8 +87,11 @@ impl MockHarness {
                     }
                 }
                 None => {
-                    // Broadcast to all nodes
+                    // Broadcast to all (other) nodes
                     for (_, process) in self.processes.iter_mut() {
+                        if process.id == sender {
+                            continue;
+                        }
                         let result =
                             process.process_message(message.clone(), sender.clone(), &mut to_send);
 
@@ -98,12 +102,14 @@ impl MockHarness {
                 }
             }
 
-            self.pending_messages.extend(
+            next_round.extend(
                 to_send
                     .drain(..)
                     .map(|(msg, dest)| (msg, sender.clone(), dest)),
             );
         }
+
+        self.pending_messages.extend(next_round);
 
         made_progress
     }
@@ -156,6 +162,9 @@ impl MockHarness {
 
         self.steps += 1;
 
+        for (_, process) in self.processes.iter() {
+            tracing::info!(target: "process_state", process_id = ?process.id, time = self.time, steps = self.steps, tips = ?process.index.tips);
+        }
         made_progress
     }
 
