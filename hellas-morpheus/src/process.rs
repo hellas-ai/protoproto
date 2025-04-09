@@ -336,7 +336,11 @@ impl MorpheusProcess {
         message: (Message, Option<Identity>),
     ) {
         if message.1.is_none() || message.1.as_ref().unwrap() == &self.id {
-            self.received_messages.insert(message.0.clone());
+            // IMPORTANT: implements note from page 8:
+            // In what follows, we suppose that, when a correct process sends a
+            // message to ‘all processes’, it regards that message as
+            // immediately received by itself
+            self.process_message(message.0.clone(), self.id.clone(), to_send);
         }
         to_send.push(message);
     }
