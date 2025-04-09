@@ -8,7 +8,7 @@ authors = ["ember arlynx <ember@hellas.ai>"]
 
 [dependencies]
 hellas-morpheus = { path = "../hellas-morpheus" }
-
+serde = { version = "1.0", features = ["derive"] }
 leptos = { version = "0.7", features = ["csr", "nightly"] }
 leptos_meta = { version = "0.7" }
 leptos_router = { version = "0.7", features = ["nightly"] }

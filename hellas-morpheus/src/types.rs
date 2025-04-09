@@ -136,7 +136,7 @@ pub enum BlockData {
         transactions: Vec<Transaction>,
     },
     Lead {
-        justification: Vec<Signed<StartView>>,
+        justification: Vec<Arc<Signed<StartView>>>,
     },
 }
 

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::*;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct PendingVotes {
     pub tr_1: BTreeMap<BlockKey, bool>,
     pub tr_2: BTreeMap<BlockKey, bool>,
@@ -18,7 +18,7 @@ pub struct PendingVotes {
 }
 
 /// Tracks all structural state
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StateIndex {
     /// Stores QCs indexed by their VoteData
     /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"

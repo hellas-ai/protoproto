@@ -8,7 +8,8 @@
 
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    collections::{BTreeMap, VecDeque}, sync::RwLock,
 };
 
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::*;
 
 /// A basic simulation harness for MorpheusProcess
-
+#[derive(Clone)]
 pub struct MockHarness {
     /// The current logical time of the simulation
     pub time: u128,
@@ -40,7 +41,7 @@ pub struct MockHarness {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TxGenPolicy {
     EveryNSteps { n: usize },
-    OncePerView { prev_view: RefCell<Option<ViewNum>> },
+    OncePerView { prev_view: Arc<RwLock<Option<ViewNum>>> },
     Always,
     Never,
 }
@@ -182,11 +183,11 @@ impl MockHarness {
                     }
                 }
                 Some(TxGenPolicy::OncePerView { prev_view }) => {
-                    if process.view_i != prev_view.borrow().unwrap_or(ViewNum(-1)) {
+                    if process.view_i != prev_view.read().unwrap().unwrap_or(ViewNum(-1)) {
                         process
                             .ready_transactions
                             .push(Transaction::Opaque(vec![1, 2, 3, 4]));
-                        *prev_view.borrow_mut() = Some(process.view_i);
+                        *prev_view.write().unwrap() = Some(process.view_i);
                     }
                 }
                 Some(TxGenPolicy::Always) => {

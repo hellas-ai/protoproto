@@ -16,7 +16,7 @@ const END_VIEW_TIMEOUT: u128 = 12;
 /// This struct implements the Algorithm 1 from the Morpheus pseudocode,
 /// maintaining all state required for processing messages, voting, and
 /// producing blocks according to the protocol specification.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct MorpheusProcess {
     /// Identity of this process (equivalent to p_i in the pseudocode)
     pub id: Identity,
@@ -93,14 +93,14 @@ pub struct MorpheusProcess {
     /// All messages received by this process
     pub received_messages: BTreeSet<Message>,
 
-    pub genesis: Arc<Block>,
+    pub genesis: Arc<Signed<Block>>,
     pub genesis_qc: Arc<ThreshSigned<VoteData>>,
     pub ready_transactions: Vec<Transaction>,
 
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Tracks votes for a particular data type and helps form quorums
 ///
 /// This is an implementation helper that tracks votes from different processes
@@ -212,7 +212,7 @@ impl MorpheusProcess {
                 Message::QC(genesis_qc.clone()),
             ]),
 
-            genesis: Arc::new(genesis_block.data.clone()),
+            genesis: genesis_block,
             genesis_qc: genesis_qc.clone(),
             ready_transactions: Vec::new(),
             pending_votes: BTreeMap::new(),

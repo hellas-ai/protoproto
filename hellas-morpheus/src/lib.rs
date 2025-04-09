@@ -46,5 +46,6 @@ pub mod tracing_setup;
 
 pub use block_validation::BlockValidationError;
 pub use invariants::InvariantViolation;
+pub use state_tracking::{PendingVotes, StateIndex};
 pub use process::*;
 pub use types::*;

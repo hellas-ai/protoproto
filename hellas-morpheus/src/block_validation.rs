@@ -1,5 +1,5 @@
 use crate::*;
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 /// Represents the different ways a block validation can fail
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -339,7 +339,7 @@ impl MorpheusProcess {
                 if block.key.slot == SlotNum(0)
                     || prev_leader_for[0].data.for_which.view < block.key.view
                 {
-                    let mut just: Vec<Signed<StartView>> = justification.clone();
+                    let mut just: Vec<Arc<Signed<StartView>>> = justification.clone();
                     just.sort_by(|m1, m2| m1.author.cmp(&m2.author));
 
                     if just.len() < self.n - self.f {

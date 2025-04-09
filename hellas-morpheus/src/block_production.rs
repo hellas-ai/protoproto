@@ -190,10 +190,6 @@ impl MorpheusProcess {
 
         let (one_qc, justification) = if !has_produced_lead_block {
             let view_messages = self.start_views.get(&view).cloned().unwrap_or_default();
-            let view_messages = view_messages
-                .into_iter()
-                .map(|msg| Signed::clone(&msg))
-                .collect::<Vec<_>>();
 
             let max_qc = view_messages
                 .iter()

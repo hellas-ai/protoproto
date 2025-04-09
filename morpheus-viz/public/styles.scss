@@ -50,3 +50,74 @@ button {
   text-align: center;
   margin: 2rem;
 }
+
+/* Simulation Builder Styles */
+.simulation-builder {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: var(--size-5);
+  background-color: var(--surface-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+}
+
+.simulation-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4);
+  margin-bottom: var(--size-6);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: var(--size-2);
+}
+
+.form-group label {
+  font-weight: var(--font-weight-6);
+  color: var(--text-2);
+}
+
+.form-group input {
+  width: 100%;
+  padding: var(--size-2);
+  border: 1px solid var(--surface-3);
+  border-radius: var(--radius-2);
+  font-size: var(--font-size-2);
+}
+
+.input-error {
+  border-color: var(--red-6) !important;
+  background-color: var(--red-1);
+}
+
+.error-message {
+  color: var(--red-7);
+  font-size: var(--font-size-1);
+  margin-top: var(--size-1);
+}
+
+button[type="submit"] {
+  margin-top: var(--size-4);
+  padding: var(--size-3) var(--size-6);
+  background-color: var(--blue-6);
+  color: white;
+  font-weight: var(--font-weight-6);
+  border: none;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+button[type="submit"]:hover {
+  background-color: var(--blue-7);
+}
+
+.process-viewer {
+  margin-top: var(--size-6);
+  border-top: 1px solid var(--surface-3);
+  padding-top: var(--size-6);
+}

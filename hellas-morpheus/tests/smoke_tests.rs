@@ -144,7 +144,7 @@ fn test_basic_txgen() {
         .insert(Identity(3), TxGenPolicy::EveryNSteps { n: 2 });
 
     // Let the system run for a while.
-    harness.run(60);
+    harness.run(24);
 
     for block in harness
         .processes

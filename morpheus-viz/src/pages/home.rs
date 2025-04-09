@@ -1,5 +1,11 @@
 use crate::components::counter_btn::Button;
-use leptos::prelude::*;
+use crate::components::process_viewer::{ProcessViewer, ProcessViewerStyles};
+use crate::pages::simulation_builder::SimulationBuilder;
+
+use hellas_morpheus::test_harness::MockHarness;
+use hellas_morpheus::{Identity, MorpheusProcess};
+use leptos::wasm_bindgen::JsCast;
+use leptos::{prelude::*, web_sys};
 
 /// Default Home Page
 #[component]
@@ -27,11 +33,7 @@ pub fn Home() -> impl IntoView {
             <div class="container">
                 <h1>"Welcome to Morpheus"</h1>
 
-                <div class="buttons">
-                    <Button />
-                    <Button increment=5 />
-                </div>
-
+                <SimulationBuilder />
             </div>
         </ErrorBoundary>
     }

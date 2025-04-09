@@ -1,0 +1,15 @@
+1. Representation of blocks, votes, quorum certificates matches paper
+2. Representation of messages matches pages 8 and 9
+3. Block validation logic matches pages 9 and 10
+4. process_message correctly implements Algorithm 1
+5. record_qc updates all state in a way compatible with the paper, in particular:
+   - The definition of tips in the paper is implemented correctly
+   - Finalized block tracking matches the paper
+6. record_block updates state in a way compatible with the paper
+7. observes correctly implements the relation from the paper
+8. Pending vote evaluation correctly implements the paper
+9. QCs are automatically formed from votes
+10. View transitions happen according to the protocol
+11. State changes in state_tracking.rs are compatible with block_production.rs
+12. Leader ready matches paper
+13. Tr and Leader block creation matches paper
