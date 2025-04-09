@@ -11,7 +11,7 @@ impl MorpheusProcess {
         if self.id == self.lead(self.view_i)
             && self.leader_ready()
             && self.phase_i.get(&self.view_i).unwrap_or(&Phase::High) == &Phase::High
-            && self.tips.len() > 1
+            && self.index.tips.len() > 1
         {
             self.make_leader_block(to_send);
         }
@@ -21,7 +21,7 @@ impl MorpheusProcess {
         let has_transactions = !self.ready_transactions.is_empty();
 
         if self.slot_i_tr > SlotNum(0) {
-            let has_prev_qc = self.qc_by_slot.contains_key(&(
+            let has_prev_qc = self.index.qc_by_slot.contains_key(&(
                 BlockType::Tr,
                 self.id.clone(),
                 SlotNum(self.slot_i_tr.0 - 1),
@@ -39,7 +39,8 @@ impl MorpheusProcess {
 
         if slot.0 > 0 {
             if let Some(prev_qc) =
-                self.qc_by_slot
+                self.index
+                    .qc_by_slot
                     .get(&(BlockType::Tr, self.id.clone(), SlotNum(slot.0 - 1)))
             {
                 prev_qcs.push(prev_qc.clone());
@@ -49,9 +50,9 @@ impl MorpheusProcess {
         }
 
         // If there's a single tip, point to it as well
-        if self.tips.len() == 1 {
-            let tip = &self.tips[0];
-            let tip_qc = self.qcs.get(tip).unwrap();
+        if self.index.tips.len() == 1 {
+            let tip = &self.index.tips[0];
+            let tip_qc = self.index.qcs.get(tip).unwrap();
 
             // Don't add duplicate QC
             if !prev_qcs
@@ -69,7 +70,7 @@ impl MorpheusProcess {
             .unwrap_or(0)
             + 1;
 
-        let max_1qc = self.max_1qc.clone();
+        let max_1qc = self.index.max_1qc.clone();
 
         let block_key = BlockKey {
             type_: BlockType::Tr,
@@ -121,7 +122,7 @@ impl MorpheusProcess {
 
             // Check for previous leader block QC if not at slot 0
             let has_prev_qc = if slot.0 > 0 {
-                self.qc_by_slot.contains_key(&(
+                self.index.qc_by_slot.contains_key(&(
                     BlockType::Lead,
                     self.id.clone(),
                     SlotNum(slot.0 - 1),
@@ -135,6 +136,7 @@ impl MorpheusProcess {
 
         if has_produced_lead_block && slot.0 > 0 {
             let prev_qcs = self
+                .index
                 .qc_by_view
                 .get(&(BlockType::Lead, self.id.clone(), view));
 
@@ -153,14 +155,16 @@ impl MorpheusProcess {
         let view = self.view_i;
 
         let mut prev_qcs: Vec<Arc<ThreshSigned<VoteData>>> = self
+            .index
             .tips
             .iter()
-            .filter_map(|tip| self.qcs.get(tip).cloned())
+            .filter_map(|tip| self.index.qcs.get(tip).cloned())
             .collect();
 
         if slot.0 > 0 {
             if let Some(prev_qc) =
-                self.qc_by_slot
+                self.index
+                    .qc_by_slot
                     .get(&(BlockType::Lead, self.id.clone(), SlotNum(slot.0 - 1)))
             {
                 if !prev_qcs
@@ -197,11 +201,12 @@ impl MorpheusProcess {
                 .map(|msg| &msg.data.qc)
                 .max_by(|a, b| a.data.compare_qc(&b.data))
                 .cloned()
-                .unwrap_or_else(|| ThreshSigned::clone(&self.max_1qc));
+                .unwrap_or_else(|| ThreshSigned::clone(&self.index.max_1qc));
 
             (max_qc, view_messages)
         } else {
             let prev_qcs = self
+                .index
                 .qc_by_view
                 .get(&(BlockType::Lead, self.id.clone(), view));
             let prev_leader_qc = prev_qcs
@@ -210,7 +215,7 @@ impl MorpheusProcess {
                         .find(|qc| qc.data.z == 1 && qc.data.for_which.slot == SlotNum(slot.0 - 1))
                 })
                 .map(|qc| ThreshSigned::clone(qc))
-                .unwrap_or_else(|| ThreshSigned::clone(&self.max_1qc));
+                .unwrap_or_else(|| ThreshSigned::clone(&self.index.max_1qc));
 
             (prev_leader_qc, vec![])
         };

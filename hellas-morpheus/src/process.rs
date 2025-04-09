@@ -4,9 +4,12 @@ use std::{
     sync::Arc,
 };
 
-use crate::state_tracking::PendingVotes;
+use crate::state_tracking::{PendingVotes, StateIndex};
 use crate::{format::format_message, *};
 use serde::{Deserialize, Serialize};
+
+const COMPLAIN_TIMEOUT: u128 = 6;
+const END_VIEW_TIMEOUT: u128 = 12;
 
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
 ///
@@ -81,80 +84,7 @@ pub struct MorpheusProcess {
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
-    /// Stores QCs indexed by their VoteData
-    /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
-
-    /// Stores all 1-QCs seen by this process
-    pub all_1qc: BTreeSet<Arc<ThreshSigned<VoteData>>>,
-
-    /// Stores the current tips of the block DAG
-    /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
-    pub tips: Vec<VoteData>,
-
-    /// Maps block keys to blocks (part of M_i in pseudocode)
-    /// Implements part of "the set of all received messages"
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub blocks: BTreeMap<BlockKey, Arc<Signed<Block>>>,
-
-    // === Performance optimization indexes ===
-    /// Tracks which blocks point to which other blocks
-    /// Used to efficiently determine the DAG structure
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub block_pointed_by: BTreeMap<BlockKey, BTreeSet<BlockKey>>,
-
-    /// Tracks the maximum view seen and its associated VoteData
-    pub max_view: (ViewNum, VoteData),
-
-    /// Tracks the maximum height block seen and its key
-    /// Used for identifying the tallest block in the DAG
-    pub max_height: (usize, BlockKey),
-
-    /// Stores the maximum 1-QC seen by this process
-    /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v),
-    /// where q' is a maximal amongst 1-QCs seen by p_i"
-    pub max_1qc: Arc<ThreshSigned<VoteData>>,
-
-    /// Tracks unfinalized blocks with 2-QC
-    /// Used to identify blocks that have 2-QC but are not yet finalized
-    pub unfinalized_2qc: BTreeSet<VoteData>,
-
-    /// Maps block keys to their finalization status
-    /// Used to track which blocks have been finalized
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub finalized: BTreeMap<BlockKey, bool>,
-
-    /// Maps block keys to their unfinalized QCs
-    /// Used to track which QCs are not yet finalized
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub unfinalized: BTreeMap<BlockKey, BTreeSet<VoteData>>,
-
-    /// Tracks whether we've seen a leader block for each view
-    /// Used to implement logic that depends on leader blocks within a view
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub contains_lead_by_view: BTreeMap<ViewNum, bool>,
-
-    /// Maps views to sets of unfinalized leader blocks
-    /// Tracks which leader blocks are not yet finalized by view
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
-
-    /// Quick index to QCs by block type, author, and slot
-    /// Enables O(1) lookup of QCs
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), Arc<ThreshSigned<VoteData>>>,
-
-    /// Maps (type, author, view) to QCs for efficient retrieval
-    /// Used to find QCs for a specific block type, author, and view
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<Arc<ThreshSigned<VoteData>>>>,
-
-    /// Maps (type, view, author) to blocks for efficient retrieval
-    /// Used to find blocks of a specific type, view, and author
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block>>>>,
-
+    pub index: StateIndex,
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
     #[serde(with = "serde_json_any_key::any_key_map")]
@@ -271,48 +201,7 @@ impl MorpheusProcess {
                 votes: BTreeMap::new(),
             },
             start_views: BTreeMap::new(),
-            qcs: {
-                let mut map = BTreeMap::new();
-                map.insert(genesis_qc.data.clone(), genesis_qc.clone());
-                map
-            },
-            max_view: (ViewNum(-1), genesis_qc.data.clone()),
-            max_height: (0, GEN_BLOCK_KEY),
-            max_1qc: genesis_qc.clone(),
-            all_1qc: BTreeSet::new(),
-            tips: vec![genesis_qc.data.clone()],
-            blocks: {
-                let mut map = BTreeMap::new();
-                map.insert(GEN_BLOCK_KEY, genesis_block.clone());
-                map
-            },
-            block_pointed_by: BTreeMap::new(),
-            unfinalized_2qc: BTreeSet::new(),
-            finalized: {
-                let mut map = BTreeMap::new();
-                map.insert(GEN_BLOCK_KEY, true);
-                map
-            },
-            unfinalized: BTreeMap::new(),
-            contains_lead_by_view: BTreeMap::new(),
-            unfinalized_lead_by_view: BTreeMap::new(),
-
-            qc_by_slot: BTreeMap::from([(
-                (BlockType::Genesis, Identity(u64::MAX), SlotNum(0)),
-                genesis_qc.clone(),
-            )]),
-            qc_by_view: BTreeMap::from([(
-                (BlockType::Genesis, Identity(u64::MAX), ViewNum(-1)),
-                vec![genesis_qc.clone()],
-            )]),
-            block_index: {
-                let mut map = BTreeMap::new();
-                map.insert(
-                    (BlockType::Genesis, ViewNum(-1), Identity(u64::MAX)),
-                    vec![genesis_block.clone()],
-                );
-                map
-            },
+            index: StateIndex::new(genesis_qc.clone(), genesis_block.clone()),
             produced_lead_in_view: {
                 let mut map = BTreeMap::new();
                 map.insert(ViewNum(0), false);
@@ -416,10 +305,10 @@ impl MorpheusProcess {
                     return false;
                 }
                 self.record_qc(&qc);
-                if self.max_view.0 > self.view_i {
+                if self.index.max_view.0 > self.view_i {
                     self.end_view(
-                        Message::QC(self.qcs.get(&self.max_view.1).cloned().unwrap()),
-                        self.max_view.0,
+                        Message::QC(self.index.qcs.get(&self.index.max_view.1).cloned().unwrap()),
+                        self.index.max_view.0,
                         to_send,
                     );
                 }
@@ -513,12 +402,12 @@ impl MorpheusProcess {
 
         // Send all tips we've created to the new leader
         // "Send all tips q' of Q_i such that q'.auth = p_i to lead(v)"
-        for tip in self.tips.clone() {
+        for tip in self.index.tips.clone() {
             if tip.for_which.author == Some(self.id.clone()) {
                 self.send_msg(
                     to_send,
                     (
-                        Message::QC(self.qcs.get(&tip).unwrap().clone()),
+                        Message::QC(self.index.qcs.get(&tip).unwrap().clone()),
                         Some(self.lead(new_view)),
                     ),
                 );
@@ -530,7 +419,7 @@ impl MorpheusProcess {
                 Message::StartView(Arc::new(Signed {
                     data: StartView {
                         view: new_view,
-                        qc: ThreshSigned::clone(&self.max_1qc),
+                        qc: ThreshSigned::clone(&self.index.max_1qc),
                     },
                     author: self.id.clone(),
                     signature: Signature {},
@@ -553,28 +442,29 @@ impl MorpheusProcess {
     pub fn check_timeouts(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
         let time_in_view = self.current_time - self.view_entry_time;
 
-        if time_in_view >= self.delta * 6 {
-            let maximal_unfinalized =
-                self.unfinalized
-                    .iter()
-                    .flat_map(|(_, qcs)| qcs)
-                    .max_by(|&qc1, &qc2| {
-                        // FIXME: when the paper says maximal, does it mean unique?
-                        if self.observes(qc1.clone(), qc2) {
-                            Ordering::Greater
-                        } else if self.observes(qc2.clone(), qc1) {
-                            Ordering::Less
-                        } else {
-                            Ordering::Equal
-                        }
-                    });
+        if time_in_view >= self.delta * COMPLAIN_TIMEOUT {
+            let maximal_unfinalized = self
+                .index
+                .unfinalized
+                .iter()
+                .flat_map(|(_, qcs)| qcs)
+                .max_by(|&qc1, &qc2| {
+                    // FIXME: when the paper says maximal, does it mean unique?
+                    if self.observes(qc1.clone(), qc2) {
+                        Ordering::Greater
+                    } else if self.observes(qc2.clone(), qc1) {
+                        Ordering::Less
+                    } else {
+                        Ordering::Equal
+                    }
+                });
 
             if let Some(qc_data) = maximal_unfinalized {
                 if !self.complained_qcs.insert(qc_data.clone()) {
                     self.send_msg(
                         to_send,
                         (
-                            Message::QC(self.qcs.get(&qc_data).cloned().unwrap()),
+                            Message::QC(self.index.qcs.get(&qc_data).cloned().unwrap()),
                             Some(self.lead(self.view_i)),
                         ),
                     );
@@ -583,7 +473,7 @@ impl MorpheusProcess {
         }
 
         // Second timeout - 12Δ, send end-view message
-        if time_in_view >= self.delta * 12 && !self.unfinalized.is_empty() {
+        if time_in_view >= self.delta * END_VIEW_TIMEOUT && !self.index.unfinalized.is_empty() {
             self.send_msg(
                 to_send,
                 (

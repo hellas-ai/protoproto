@@ -149,7 +149,7 @@ fn test_basic_txgen() {
     // 51 blocks = 30 blocks from p3 + 20 blocks from p2 + 1 genesis block?
     // where are the leader blocks?
     assert_eq!(
-        harness.processes.get(&Identity(2)).unwrap().blocks.len(),
+        harness.processes.get(&Identity(2)).unwrap().index.blocks.len(),
         51
     );
 }
@@ -410,7 +410,7 @@ fn test_pending_votes_invariants() {
     process.record_block(&Arc::new(block));
 
     // Mark the block as finalized
-    process.finalized.insert(block_key.clone(), true);
+    process.index.finalized.insert(block_key.clone(), true);
 
     // Add to pending votes
     let pending = process.pending_votes.entry(current_view).or_default();

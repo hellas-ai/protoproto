@@ -430,10 +430,10 @@ impl MorpheusProcess {
 
         // Reconstruct Q_i - the set of QCs
         // According to pseudocode: "Q_i stores at most one z-QC for each block"
-        let q_i_qcs: BTreeSet<&VoteData> = self.qcs.keys().collect();
+        let q_i_qcs: BTreeSet<&VoteData> = self.index.qcs.keys().collect();
 
         // Check block DAG consistency
-        for (key, block) in &self.blocks {
+        for (key, block) in &self.index.blocks {
             // Check that block key matches the block's actual key
             if &block.data.key != key {
                 violations.push(InvariantViolation::BlockKeyMismatch {
@@ -445,7 +445,7 @@ impl MorpheusProcess {
             // Check that each block is correctly indexed in block_pointed_by
             for qc in &block.data.prev {
                 let pointed_block_key = &qc.data.for_which;
-                if let Some(pointed_blocks) = self.block_pointed_by.get(pointed_block_key) {
+                if let Some(pointed_blocks) = self.index.block_pointed_by.get(pointed_block_key) {
                     if !pointed_blocks.contains(key) {
                         violations.push(InvariantViolation::BlockPointsToMissingFromPointedBy {
                             block: key.clone(),
@@ -462,9 +462,9 @@ impl MorpheusProcess {
         }
 
         // Check block_pointed_by consistency
-        for (key, pointing_blocks) in &self.block_pointed_by {
+        for (key, pointing_blocks) in &self.index.block_pointed_by {
             // Verify the key exists in blocks
-            if !self.blocks.contains_key(key) && *key != GEN_BLOCK_KEY {
+            if !self.index.blocks.contains_key(key) && *key != GEN_BLOCK_KEY {
                 violations.push(InvariantViolation::BlockPointedByContainsNonExistentBlock {
                     key: key.clone(),
                 });
@@ -472,7 +472,7 @@ impl MorpheusProcess {
 
             // Verify that each pointing block actually points to this block
             for pointing_key in pointing_blocks {
-                if let Some(pointing_block) = self.blocks.get(pointing_key) {
+                if let Some(pointing_block) = self.index.blocks.get(pointing_key) {
                     let points_to_key = pointing_block
                         .data
                         .prev
@@ -497,7 +497,7 @@ impl MorpheusProcess {
         }
 
         // Check QC consistency
-        for (vote_data, qc) in &self.qcs {
+        for (vote_data, qc) in &self.index.qcs {
             // Check that QC data matches index
             if &qc.data != vote_data {
                 violations.push(InvariantViolation::QcDataMismatch {
@@ -516,7 +516,7 @@ impl MorpheusProcess {
                     .unwrap_or(Identity(u64::MAX)),
                 vote_data.for_which.slot,
             );
-            if let Some(indexed_qc) = self.qc_by_slot.get(&index_key) {
+            if let Some(indexed_qc) = self.index.qc_by_slot.get(&index_key) {
                 if &indexed_qc.data != vote_data {
                     violations.push(InvariantViolation::QcIndexMismatch {
                         qc_index_data: indexed_qc.data.clone(),
@@ -526,7 +526,7 @@ impl MorpheusProcess {
             } else {
                 violations.push(InvariantViolation::QcNotInQcIndex {
                     vote_data: vote_data.clone(),
-                    qc_index: format!("{:?}", self.qc_by_slot),
+                    qc_index: format!("{:?}", self.index.qc_by_slot),
                 });
             }
 
@@ -540,7 +540,7 @@ impl MorpheusProcess {
                     .unwrap_or(Identity(u64::MAX)),
                 vote_data.for_which.view,
             );
-            if let Some(view_qcs) = self.qc_by_view.get(&view_key) {
+            if let Some(view_qcs) = self.index.qc_by_view.get(&view_key) {
                 if !view_qcs.iter().any(|q| &q.data == vote_data) {
                     violations.push(InvariantViolation::QcNotInQcByView {
                         vote_data: vote_data.clone(),
@@ -572,7 +572,7 @@ impl MorpheusProcess {
         }
 
         // Check if our computed tips match the actual tips
-        let actual_tips_set: BTreeSet<VoteData> = self.tips.iter().cloned().collect();
+        let actual_tips_set: BTreeSet<VoteData> = self.index.tips.iter().cloned().collect();
         let computed_tips_set: BTreeSet<VoteData> = computed_tips.into_iter().collect();
 
         if actual_tips_set != computed_tips_set {
@@ -600,22 +600,27 @@ impl MorpheusProcess {
         // Check finalization according to pseudocode definition:
         // "Process p_i regards q ∈ Q_i (and q.b) as final if there exists q' ∈ Q_i such
         // that q' ⪰ q and q is a 2-QC (for any block)."
-        for (vote_data, _) in &self.qcs {
+        for (vote_data, _) in &self.index.qcs {
             // Only check 2-QCs for finalization
             if vote_data.z == 2 {
                 let block_key = &vote_data.for_which;
 
                 // Check if any QC observes this 2-QC
-                let observed_by_any = self
-                    .qcs
-                    .keys()
-                    .any(|q_data| q_data != vote_data && self.observes(q_data.clone(), vote_data));
+                let observed_by_any =
+                    self.index.qcs.keys().any(|q_data| {
+                        q_data != vote_data && self.observes(q_data.clone(), vote_data)
+                    });
 
                 // According to pseudocode, this 2-QC should be final if observed by any other QC
                 let should_be_final = observed_by_any;
 
                 // Check if it's actually marked as final
-                let is_marked_final = self.finalized.get(block_key).cloned().unwrap_or(false);
+                let is_marked_final = self
+                    .index
+                    .finalized
+                    .get(block_key)
+                    .cloned()
+                    .unwrap_or(false);
 
                 if should_be_final && !is_marked_final {
                     violations.push(InvariantViolation::BlockWithObserved2QcNotFinalized {
@@ -633,9 +638,15 @@ impl MorpheusProcess {
         }
 
         // Check max_height consistency
-        let max_height = self.max_height.0;
-        let max_height_key = &self.max_height.1;
-        let actual_max_height = self.blocks.keys().map(|k| k.height).max().unwrap_or(0);
+        let max_height = self.index.max_height.0;
+        let max_height_key = &self.index.max_height.1;
+        let actual_max_height = self
+            .index
+            .blocks
+            .keys()
+            .map(|k| k.height)
+            .max()
+            .unwrap_or(0);
 
         if max_height != actual_max_height {
             violations.push(InvariantViolation::MaxHeightMismatch {
@@ -644,7 +655,7 @@ impl MorpheusProcess {
             });
         }
 
-        if max_height > 0 && !self.blocks.contains_key(max_height_key) {
+        if max_height > 0 && !self.index.blocks.contains_key(max_height_key) {
             violations.push(InvariantViolation::MaxHeightKeyDoesNotExist {
                 key: max_height_key.clone(),
             });
@@ -652,30 +663,30 @@ impl MorpheusProcess {
 
         // Check max_1qc maximality according to compare_qc
         // "max_1qc is a maximal amongst 1-QCs seen by p_i"
-        if self.max_1qc.data.z != 1 {
+        if self.index.max_1qc.data.z != 1 {
             violations.push(InvariantViolation::Max1QcHasWrongZ {
-                z: self.max_1qc.data.z,
+                z: self.index.max_1qc.data.z,
             });
         }
 
         // Check if max_1qc is actually maximal among all 1-QCs
-        for (vote_data, _) in &self.qcs {
+        for (vote_data, _) in &self.index.qcs {
             if vote_data.z == 1 {
-                let comparison = vote_data.compare_qc(&self.max_1qc.data);
+                let comparison = vote_data.compare_qc(&self.index.max_1qc.data);
                 if comparison == std::cmp::Ordering::Greater {
                     violations.push(InvariantViolation::Found1QcGreaterThanMax1Qc {
                         found: vote_data.clone(),
-                        max_1qc: self.max_1qc.data.clone(),
+                        max_1qc: self.index.max_1qc.data.clone(),
                     });
                 }
             }
         }
 
         // Check finalization consistency
-        for (key, is_finalized) in &self.finalized {
+        for (key, is_finalized) in &self.index.finalized {
             if *is_finalized {
                 // If finalized, it shouldn't be in unfinalized
-                if self.unfinalized.contains_key(key) {
+                if self.index.unfinalized.contains_key(key) {
                     violations.push(InvariantViolation::BlockFinalizedButAlsoUnfinalized {
                         block: key.clone(),
                     });
@@ -684,7 +695,7 @@ impl MorpheusProcess {
         }
 
         // Check unfinalized_2qc consistency
-        for vote_data in &self.unfinalized_2qc {
+        for vote_data in &self.index.unfinalized_2qc {
             if vote_data.z != 2 {
                 violations.push(InvariantViolation::UnfinalizedQcHasWrongZ {
                     vote_data: vote_data.clone(),
@@ -692,7 +703,7 @@ impl MorpheusProcess {
             }
 
             // Should be in qcs
-            if !self.qcs.contains_key(vote_data) {
+            if !self.index.qcs.contains_key(vote_data) {
                 violations.push(InvariantViolation::UnfinalizedQcNotInQcs {
                     vote_data: vote_data.clone(),
                 });
@@ -700,7 +711,7 @@ impl MorpheusProcess {
 
             // The block should be unfinalized
             let block_key = &vote_data.for_which;
-            if !self.unfinalized.contains_key(block_key) {
+            if !self.index.unfinalized.contains_key(block_key) {
                 violations.push(InvariantViolation::BlockForUnfinalizedQcNotInUnfinalized {
                     block: block_key.clone(),
                 });
@@ -739,7 +750,7 @@ impl MorpheusProcess {
         }
         for (vote_data, &received_count) in &vote_counts {
             if received_count >= self.n - self.f {
-                if !self.qcs.contains_key(vote_data) {
+                if !self.index.qcs.contains_key(vote_data) {
                     violations.push(InvariantViolation::MissingQCDespiteQuorum {
                         vote_data: vote_data.clone(),
                     });
@@ -762,7 +773,7 @@ impl MorpheusProcess {
 
         for (view, pending) in &self.pending_votes {
             for block_key in pending.tr_1.keys() {
-                if !self.blocks.contains_key(block_key) {
+                if !self.index.blocks.contains_key(block_key) {
                     violations.push(InvariantViolation::PendingVotesBlockNotFound {
                         view: *view,
                         block_key: block_key.clone(),
@@ -771,7 +782,13 @@ impl MorpheusProcess {
                     continue;
                 }
 
-                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                if self
+                    .index
+                    .finalized
+                    .get(block_key)
+                    .cloned()
+                    .unwrap_or(false)
+                {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -794,7 +811,7 @@ impl MorpheusProcess {
             }
 
             for block_key in pending.tr_2.keys() {
-                if !self.blocks.contains_key(block_key) {
+                if !self.index.blocks.contains_key(block_key) {
                     violations.push(InvariantViolation::PendingVotesBlockNotFound {
                         view: *view,
                         block_key: block_key.clone(),
@@ -803,7 +820,13 @@ impl MorpheusProcess {
                     continue;
                 }
 
-                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                if self
+                    .index
+                    .finalized
+                    .get(block_key)
+                    .cloned()
+                    .unwrap_or(false)
+                {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -825,7 +848,7 @@ impl MorpheusProcess {
             }
 
             for block_key in pending.lead_1.keys() {
-                if !self.blocks.contains_key(block_key) {
+                if !self.index.blocks.contains_key(block_key) {
                     violations.push(InvariantViolation::PendingVotesBlockNotFound {
                         view: *view,
                         block_key: block_key.clone(),
@@ -834,7 +857,13 @@ impl MorpheusProcess {
                     continue;
                 }
 
-                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                if self
+                    .index
+                    .finalized
+                    .get(block_key)
+                    .cloned()
+                    .unwrap_or(false)
+                {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -857,7 +886,7 @@ impl MorpheusProcess {
             }
 
             for block_key in pending.lead_2.keys() {
-                if !self.blocks.contains_key(block_key) {
+                if !self.index.blocks.contains_key(block_key) {
                     violations.push(InvariantViolation::PendingVotesBlockNotFound {
                         view: *view,
                         block_key: block_key.clone(),
@@ -866,7 +895,13 @@ impl MorpheusProcess {
                     continue;
                 }
 
-                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                if self
+                    .index
+                    .finalized
+                    .get(block_key)
+                    .cloned()
+                    .unwrap_or(false)
+                {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -890,10 +925,15 @@ impl MorpheusProcess {
 
             // For the current view, check if all eligible blocks are in pending_votes
             if *view == self.view_i {
-                for (block_key, _) in &self.blocks {
+                for (block_key, _) in &self.index.blocks {
                     if block_key.type_ == BlockType::Tr
                         && block_key.view == self.view_i
-                        && !self.finalized.get(block_key).cloned().unwrap_or(false)
+                        && !self
+                            .index
+                            .finalized
+                            .get(block_key)
+                            .cloned()
+                            .unwrap_or(false)
                         && self.is_eligible_for_tr_1_vote(block_key)
                         && !pending.tr_1.contains_key(block_key)
                     {
@@ -905,11 +945,12 @@ impl MorpheusProcess {
                     }
                 }
 
-                for (vote_data, _) in &self.qcs {
+                for (vote_data, _) in &self.index.qcs {
                     if vote_data.z == 1
                         && vote_data.for_which.type_ == BlockType::Tr
                         && vote_data.for_which.view == self.view_i
                         && !self
+                            .index
                             .finalized
                             .get(&vote_data.for_which)
                             .cloned()

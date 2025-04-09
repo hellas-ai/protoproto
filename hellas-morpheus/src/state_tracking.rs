@@ -17,6 +17,132 @@ pub struct PendingVotes {
     pub dirty: bool,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct StateIndex {
+    /// Stores QCs indexed by their VoteData
+    /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
+
+    /// Stores all 1-QCs seen by this process
+    pub all_1qc: BTreeSet<Arc<ThreshSigned<VoteData>>>,
+
+    /// Stores the current tips of the block DAG
+    /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
+    pub tips: Vec<VoteData>,
+
+    /// Maps block keys to blocks (part of M_i in pseudocode)
+    /// Implements part of "the set of all received messages"
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub blocks: BTreeMap<BlockKey, Arc<Signed<Block>>>,
+
+    // === Performance optimization indexes ===
+    /// Tracks which blocks point to which other blocks
+    /// Used to efficiently determine the DAG structure
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub block_pointed_by: BTreeMap<BlockKey, BTreeSet<BlockKey>>,
+
+    /// Tracks the maximum view seen and its associated VoteData
+    pub max_view: (ViewNum, VoteData),
+
+    /// Tracks the maximum height block seen and its key
+    /// Used for identifying the tallest block in the DAG
+    pub max_height: (usize, BlockKey),
+
+    /// Stores the maximum 1-QC seen by this process
+    /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v),
+    /// where q' is a maximal amongst 1-QCs seen by p_i"
+    pub max_1qc: Arc<ThreshSigned<VoteData>>,
+
+    /// Tracks unfinalized blocks with 2-QC
+    /// Used to identify blocks that have 2-QC but are not yet finalized
+    pub unfinalized_2qc: BTreeSet<VoteData>,
+
+    /// Maps block keys to their finalization status
+    /// Used to track which blocks have been finalized
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub finalized: BTreeMap<BlockKey, bool>,
+
+    /// Maps block keys to their unfinalized QCs
+    /// Used to track which QCs are not yet finalized
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub unfinalized: BTreeMap<BlockKey, BTreeSet<VoteData>>,
+
+    /// Tracks whether we've seen a leader block for each view
+    /// Used to implement logic that depends on leader blocks within a view
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub contains_lead_by_view: BTreeMap<ViewNum, bool>,
+
+    /// Maps views to sets of unfinalized leader blocks
+    /// Tracks which leader blocks are not yet finalized by view
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
+
+    /// Quick index to QCs by block type, author, and slot
+    /// Enables O(1) lookup of QCs
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), Arc<ThreshSigned<VoteData>>>,
+
+    /// Maps (type, author, view) to QCs for efficient retrieval
+    /// Used to find QCs for a specific block type, author, and view
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<Arc<ThreshSigned<VoteData>>>>,
+
+    /// Maps (type, view, author) to blocks for efficient retrieval
+    /// Used to find blocks of a specific type, view, and author
+    #[serde(with = "serde_json_any_key::any_key_map")]
+    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block>>>>,
+}
+
+impl StateIndex {
+    pub fn new(genesis_qc: Arc<ThreshSigned<VoteData>>, genesis_block: Arc<Signed<Block>>) -> Self {
+        Self {
+            qcs: {
+                let mut map = BTreeMap::new();
+                map.insert(genesis_qc.data.clone(), genesis_qc.clone());
+                map
+            },
+            max_view: (ViewNum(-1), genesis_qc.data.clone()),
+            max_height: (0, GEN_BLOCK_KEY),
+            max_1qc: genesis_qc.clone(),
+            all_1qc: BTreeSet::new(),
+            tips: vec![genesis_qc.data.clone()],
+            blocks: {
+                let mut map = BTreeMap::new();
+                map.insert(GEN_BLOCK_KEY, genesis_block.clone());
+                map
+            },
+            block_pointed_by: BTreeMap::new(),
+            unfinalized_2qc: BTreeSet::new(),
+            finalized: {
+                let mut map = BTreeMap::new();
+                map.insert(GEN_BLOCK_KEY, true);
+                map
+            },
+            unfinalized: BTreeMap::new(),
+            contains_lead_by_view: BTreeMap::new(),
+            unfinalized_lead_by_view: BTreeMap::new(),
+
+            qc_by_slot: BTreeMap::from([(
+                (BlockType::Genesis, Identity(u64::MAX), SlotNum(0)),
+                genesis_qc.clone(),
+            )]),
+            qc_by_view: BTreeMap::from([(
+                (BlockType::Genesis, Identity(u64::MAX), ViewNum(-1)),
+                vec![genesis_qc.clone()],
+            )]),
+            block_index: {
+                let mut map = BTreeMap::new();
+                map.insert(
+                    (BlockType::Genesis, ViewNum(-1), Identity(u64::MAX)),
+                    vec![genesis_block.clone()],
+                );
+                map
+            },
+        }
+    }
+}
+
 impl MorpheusProcess {
     pub fn try_vote(
         &mut self,
@@ -95,7 +221,7 @@ impl MorpheusProcess {
     pub fn record_qc(&mut self, qc: &Arc<ThreshSigned<VoteData>>) {
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
-        if self.qcs.contains_key(&qc.data) {
+        if self.index.qcs.contains_key(&qc.data) {
             if qc.data.for_which != GEN_BLOCK_KEY {
                 tracing::warn!("recording duplicate qc for {:?}", qc.data);
             }
@@ -104,7 +230,7 @@ impl MorpheusProcess {
 
         // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
-            self.qc_by_slot.insert(
+            self.index.qc_by_slot.insert(
                 (
                     qc.data.for_which.type_,
                     author.clone(),
@@ -113,7 +239,8 @@ impl MorpheusProcess {
                 qc.clone(),
             );
 
-            self.qc_by_view
+            self.index
+                .qc_by_view
                 .entry((
                     qc.data.for_which.type_,
                     author.clone(),
@@ -124,30 +251,31 @@ impl MorpheusProcess {
         }
 
         // all new qcs are unfinalized until proven otherwise
-        self.unfinalized
+        self.index
+            .unfinalized
             .entry(qc.data.for_which.clone())
             .or_default()
             .insert(qc.data.clone());
 
         if qc.data.z == 1 {
-            self.all_1qc.insert(qc.clone());
+            self.index.all_1qc.insert(qc.clone());
 
             // FIXME: should we compare against tips? all_1qc? max_1qc should be a chain,
             // but maybe
-            if self.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
+            if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
                 tracing_setup::protocol_transition(
                     &self.id,
                     "updating max 1-QC",
-                    &self.max_1qc.data,
+                    &self.index.max_1qc.data,
                     &qc.data,
                     Some("new qc is greater than current max 1-QC"),
                 );
-                self.max_1qc = qc.clone();
+                self.index.max_1qc = qc.clone();
             }
         }
 
-        if qc.data.for_which.view > self.max_view.0 {
-            self.max_view = (qc.data.for_which.view, qc.data.clone());
+        if qc.data.for_which.view > self.index.max_view.0 {
+            self.index.max_view = (qc.data.for_which.view, qc.data.clone());
         }
 
         // TODO: don't do this _every_ time a qc is formed,
@@ -155,7 +283,7 @@ impl MorpheusProcess {
         //       checking when we next need the tips? (isn't this right away?)
 
         let mut tips_to_yeet = BTreeSet::new();
-        for tip in &self.tips {
+        for tip in &self.index.tips {
             // if the qc observes some existing tip, then that tip gets yoinked
             // in favor of the new qc
             if self.observes(qc.data.clone(), tip) {
@@ -164,26 +292,28 @@ impl MorpheusProcess {
         }
         if !tips_to_yeet.is_empty() {
             // this qc is a new tip because it observes some existing tips
-            self.tips.retain(|tip| !tips_to_yeet.contains(tip));
-            self.tips.push(qc.data.clone());
+            self.index.tips.retain(|tip| !tips_to_yeet.contains(tip));
+            self.index.tips.push(qc.data.clone());
         } else {
             // this qc still might be a new tip if none of the existing tips observe it
             if !self
+                .index
                 .tips
                 .iter()
                 .cloned()
                 .any(|tip| self.observes(tip, &qc.data))
             {
-                self.tips.push(qc.data.clone());
+                self.index.tips.push(qc.data.clone());
             }
         }
 
-        self.qcs.insert(qc.data.clone(), qc.clone());
+        self.index.qcs.insert(qc.data.clone(), qc.clone());
 
         // now find all the waiting 2-qcs that this qc can finalize
         // TODO: justify why this is correct according to the paper.
 
         let finalized_here = self
+            .index
             .unfinalized_2qc
             .iter()
             .cloned()
@@ -193,19 +323,23 @@ impl MorpheusProcess {
         if qc.data.z == 2 {
             // IMPORTANT: QC observes itself, so make sure we add it AFTER we scan,
             // otherwise this block will finalize itself.
-            self.unfinalized_2qc.insert(qc.data.clone());
+            self.index.unfinalized_2qc.insert(qc.data.clone());
         }
 
-        self.unfinalized_2qc
+        self.index
+            .unfinalized_2qc
             .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
 
         for finalized in finalized_here {
-            self.unfinalized_lead_by_view
+            self.index
+                .unfinalized_lead_by_view
                 .entry(finalized.for_which.view)
                 .or_default()
                 .remove(&finalized.for_which);
-            self.unfinalized.remove(&finalized.for_which);
-            self.finalized.insert(finalized.for_which.clone(), true);
+            self.index.unfinalized.remove(&finalized.for_which);
+            self.index
+                .finalized
+                .insert(finalized.for_which.clone(), true);
 
             self.pending_votes
                 .entry(finalized.for_which.view)
@@ -236,15 +370,16 @@ impl MorpheusProcess {
     /// It will also record any QCs that are used as pointers in the block.
     pub fn record_block(&mut self, block: &Arc<Signed<Block>>) {
         tracing::info!("recording block {:?}", block.data.key);
-        if self.blocks.contains_key(&block.data.key) {
+        if self.index.blocks.contains_key(&block.data.key) {
             tracing::warn!("recording duplicate block {:?}", block.data.key);
             return;
         }
-        if block.data.key.height > self.max_height.0 {
-            self.max_height = (block.data.key.height, block.data.key.clone());
+        if block.data.key.height > self.index.max_height.0 {
+            self.index.max_height = (block.data.key.height, block.data.key.clone());
         }
         if let Some(author) = &block.data.key.author {
-            self.block_index
+            self.index
+                .block_index
                 .entry((block.data.key.type_, block.data.key.view, author.clone()))
                 .or_insert_with(Vec::new)
                 .push(block.clone());
@@ -255,14 +390,20 @@ impl MorpheusProcess {
         }
 
         let block_key = block.data.key.clone();
-        assert_eq!(self.finalized.insert(block_key.clone(), false), None);
-        assert_eq!(self.blocks.insert(block_key.clone(), block.clone()), None);
+        assert_eq!(self.index.finalized.insert(block_key.clone(), false), None);
+        assert_eq!(
+            self.index.blocks.insert(block_key.clone(), block.clone()),
+            None
+        );
 
         let pending = self.pending_votes.entry(block.data.key.view).or_default();
         match block.data.key.type_ {
             BlockType::Lead => {
-                self.contains_lead_by_view.insert(block.data.key.view, true);
-                self.unfinalized_lead_by_view
+                self.index
+                    .contains_lead_by_view
+                    .insert(block.data.key.view, true);
+                self.index
+                    .unfinalized_lead_by_view
                     .entry(block.data.key.view)
                     .or_default()
                     .insert(block.data.key.clone());
@@ -277,7 +418,8 @@ impl MorpheusProcess {
         }
 
         for qc in &block.data.prev {
-            self.block_pointed_by
+            self.index
+                .block_pointed_by
                 .entry(qc.data.for_which.clone())
                 .or_default()
                 .insert(block_key.clone());
@@ -313,7 +455,7 @@ impl MorpheusProcess {
                 observed = true;
                 break;
             }
-            if let Some(block) = self.blocks.get(&node.for_which) {
+            if let Some(block) = self.index.blocks.get(&node.for_which) {
                 for prev in &block.data.prev {
                     to_visit.push_back(prev.data.clone());
                 }
@@ -341,7 +483,7 @@ impl MorpheusProcess {
         {
             return true;
         }
-        if let Some(block) = self.blocks.get(&looks.for_which) {
+        if let Some(block) = self.index.blocks.get(&looks.for_which) {
             if block
                 .data
                 .prev
@@ -372,11 +514,13 @@ impl MorpheusProcess {
 
         // First check global conditions for the current view
         let contains_lead = self
+            .index
             .contains_lead_by_view
             .get(&current_view)
             .copied()
             .unwrap_or(false);
         let unfinalized_lead_empty = self
+            .index
             .unfinalized_lead_by_view
             .get(&current_view)
             .map_or(true, |set| set.is_empty());
@@ -467,11 +611,12 @@ impl MorpheusProcess {
     }
 
     fn block_is_single_tip(&self, block_key: &BlockKey) -> bool {
-        if self.tips.len() != 1 {
+        if self.index.tips.len() != 1 {
             return false;
         }
-        match self.tips.get(0) {
+        match self.index.tips.get(0) {
             Some(tip) => self
+                .index
                 .block_pointed_by
                 .get(&tip.for_which)
                 .map_or(false, |parents| {
@@ -484,24 +629,26 @@ impl MorpheusProcess {
     pub(crate) fn is_eligible_for_tr_1_vote(&self, block_key: &BlockKey) -> bool {
         let has_single_tip = self.block_is_single_tip(block_key);
 
-        if !has_single_tip || !self.blocks.contains_key(block_key) {
+        if !has_single_tip || !self.index.blocks.contains_key(block_key) {
             return false;
         }
 
-        let block = self.blocks.get(block_key).unwrap();
-        self.all_1qc
+        let block = self.index.blocks.get(block_key).unwrap();
+        self.index
+            .all_1qc
             .iter()
             .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
     }
 
     pub(crate) fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
-        let has_single_tip = self.tips.len() == 1
+        let has_single_tip = self.index.tips.len() == 1
             && self
+                .index
                 .tips
                 .get(0)
                 .map_or(false, |tip| tip.z == 1 && tip.for_which.eq(block_key));
 
-        let no_higher_blocks = self.max_height.0 <= block_key.height;
+        let no_higher_blocks = self.index.max_height.0 <= block_key.height;
 
         has_single_tip && no_higher_blocks
     }

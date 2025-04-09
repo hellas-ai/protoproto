@@ -1,5 +1,5 @@
 use hellas_morpheus::{
-    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, MorpheusProcess, Phase,
+    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase,
     Signature, Signed, SlotNum, StartView, ThreshSignature, ThreshSigned, Transaction, ViewNum,
     VoteData,
 };
