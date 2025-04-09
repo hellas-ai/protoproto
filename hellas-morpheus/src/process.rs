@@ -566,14 +566,15 @@ impl MorpheusProcess {
                     });
 
             if let Some(qc_data) = maximal_unfinalized {
-                self.complained_qcs.insert(qc_data.clone());
-                self.send_msg(
-                    to_send,
-                    (
-                        Message::QC(self.qcs.get(&qc_data).cloned().unwrap()),
-                        Some(self.lead(self.view_i)),
-                    ),
-                );
+                if !self.complained_qcs.insert(qc_data.clone()) {
+                    self.send_msg(
+                        to_send,
+                        (
+                            Message::QC(self.qcs.get(&qc_data).cloned().unwrap()),
+                            Some(self.lead(self.view_i)),
+                        ),
+                    );
+                }
             }
         }
 
