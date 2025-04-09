@@ -23,6 +23,11 @@ pub enum Transaction {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct ViewNum(pub i64);
+impl ViewNum {
+    pub fn incr(&self) -> Self {
+        ViewNum(self.0 + 1)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub struct SlotNum(pub u64);

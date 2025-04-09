@@ -430,7 +430,7 @@ impl MorpheusProcess {
                 }
                 match self.end_views.record_vote(end_view.clone()) {
                     Ok(num_votes) => {
-                        if end_view.data >= self.view_i && num_votes >= self.f + 1 {
+                        if end_view.data > self.view_i && num_votes >= self.f + 1 {
                             self.send_msg(
                                 to_send,
                                 (
@@ -450,7 +450,7 @@ impl MorpheusProcess {
                 if !end_view_cert.valid_signature() {
                     return false;
                 }
-                let view = end_view_cert.data;
+                let view = end_view_cert.data.incr();
                 if view >= self.view_i {
                     self.end_view(Message::EndViewCert(end_view_cert), view, to_send);
                 }

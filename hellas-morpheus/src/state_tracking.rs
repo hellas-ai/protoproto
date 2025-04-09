@@ -96,7 +96,9 @@ impl MorpheusProcess {
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
         if self.qcs.contains_key(&qc.data) {
-            tracing::warn!("recording duplicate qc for {:?}", qc.data);
+            if qc.data.for_which != GEN_BLOCK_KEY {
+                tracing::warn!("recording duplicate qc for {:?}", qc.data);
+            }
             return;
         }
 
@@ -233,6 +235,11 @@ impl MorpheusProcess {
     ///
     /// It will also record any QCs that are used as pointers in the block.
     pub fn record_block(&mut self, block: &Arc<Signed<Block>>) {
+        tracing::info!("recording block {:?}", block.data.key);
+        if self.blocks.contains_key(&block.data.key) {
+            tracing::warn!("recording duplicate block {:?}", block.data.key);
+            return;
+        }
         if block.data.key.height > self.max_height.0 {
             self.max_height = (block.data.key.height, block.data.key.clone());
         }
