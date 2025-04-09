@@ -167,7 +167,7 @@ pub struct MorpheusProcess {
     pub genesis_qc: Arc<ThreshSigned<VoteData>>,
     pub ready_transactions: Vec<Transaction>,
 
-    pub pending_votes: PendingVotes,
+    pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -326,7 +326,7 @@ impl MorpheusProcess {
             genesis: Arc::new(genesis_block.data.clone()),
             genesis_qc: genesis_qc.clone(),
             ready_transactions: Vec::new(),
-            pending_votes: PendingVotes::default(),
+            pending_votes: BTreeMap::new(),
         }
     }
 
@@ -503,7 +503,10 @@ impl MorpheusProcess {
         self.view_entry_time = self.current_time;
 
         // View changed, we need to re-evaluate pending votes
-        self.pending_votes.dirty = true;
+        self.pending_votes
+            .entry(new_view)
+            .or_default()
+            .dirty = true;
 
         self.send_msg(to_send, (cause, None));
 

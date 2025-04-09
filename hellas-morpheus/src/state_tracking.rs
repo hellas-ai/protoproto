@@ -206,23 +206,30 @@ impl MorpheusProcess {
             self.unfinalized.remove(&finalized.for_which);
             self.finalized.insert(finalized.for_which.clone(), true);
 
-            // When blocks are finalized, we may need to re-evaluate votes
-            self.pending_votes.dirty = true;
+            self.pending_votes
+                .entry(finalized.for_which.view)
+                .or_default()
+                .dirty = true;
         }
 
         // Check if we need to vote for a leader block
         if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Lead {
-            self.pending_votes
-                .lead_2
-                .insert(qc.data.for_which.clone(), true);
+            let pending = self
+                .pending_votes
+                .entry(qc.data.for_which.view)
+                .or_default();
+            pending.lead_2.insert(qc.data.for_which.clone(), true);
+            pending.dirty = true;
         }
 
         // Instead of eagerly voting for transaction blocks, mark them as pending for evaluation
         if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Tr {
-            self.pending_votes
-                .tr_2
-                .insert(qc.data.for_which.clone(), true);
-            self.pending_votes.dirty = true;
+            let pending = self
+                .pending_votes
+                .entry(qc.data.for_which.view)
+                .or_default();
+            pending.tr_2.insert(qc.data.for_which.clone(), true);
+            pending.dirty = true;
         }
     }
 
@@ -252,6 +259,7 @@ impl MorpheusProcess {
         assert_eq!(self.finalized.insert(block_key.clone(), false), None);
         assert_eq!(self.blocks.insert(block_key.clone(), block.clone()), None);
 
+        let pending = self.pending_votes.entry(block.data.key.view).or_default();
         match block.data.key.type_ {
             BlockType::Lead => {
                 self.contains_lead_by_view.insert(block.data.key.view, true);
@@ -259,14 +267,12 @@ impl MorpheusProcess {
                     .entry(block.data.key.view)
                     .or_default()
                     .insert(block.data.key.clone());
-                self.pending_votes
-                    .lead_1
-                    .insert(block.data.key.clone(), true);
-                self.pending_votes.dirty = true;
+                pending.lead_1.insert(block.data.key.clone(), true);
+                pending.dirty = true;
             }
             BlockType::Tr => {
-                self.pending_votes.tr_1.insert(block.data.key.clone(), true);
-                self.pending_votes.dirty = true;
+                pending.tr_1.insert(block.data.key.clone(), true);
+                pending.dirty = true;
             }
             BlockType::Genesis => panic!("Why are we recording the genesis block?"),
         }
@@ -355,14 +361,15 @@ impl MorpheusProcess {
 
     /// Re-evaluate all pending votes based on current state
     pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        if !self.pending_votes.dirty {
-            return;
-        }
-
         // Only process votes for the current view
         let current_view = self.view_i;
 
-        let mut pending = std::mem::replace(&mut self.pending_votes, PendingVotes::default());
+        let mut all_pending = std::mem::replace(&mut self.pending_votes, BTreeMap::new());
+
+        let pending = all_pending.entry(current_view).or_default();
+        if !pending.dirty {
+            return;
+        }
 
         // First check global conditions for the current view
         let contains_lead = self
@@ -416,7 +423,7 @@ impl MorpheusProcess {
         }
 
         pending.dirty = false;
-        self.pending_votes = pending;
+        self.pending_votes = all_pending;
     }
 
     /// Generic method to process pending votes for blocks
