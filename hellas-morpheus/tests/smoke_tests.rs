@@ -320,3 +320,121 @@ fn test_broadcast_message() {
     // After processing, the message queue should be empty
     assert_eq!(harness.pending_messages.len(), 0);
 }
+
+#[test_log::test]
+fn test_pending_votes_invariants() {
+    // Create a test process
+    let mut process = MorpheusProcess::new(Identity(1), 3, 1);
+
+    // Verify no invariant violations in initial state
+    let violations = process.check_invariants();
+    assert!(
+        violations.is_empty(),
+        "New process has invariant violations: {:?}",
+        violations
+    );
+
+    // Manually create a pending votes entry for the current view
+    let current_view = process.view_i;
+    let pending = process.pending_votes.entry(current_view).or_default();
+
+    // Create a block key for a non-existent block to trigger an invariant violation
+    let non_existent_block = BlockKey {
+        type_: BlockType::Tr,
+        view: current_view,
+        height: 100,
+        author: Some(Identity(1)),
+        slot: SlotNum(5),
+        hash: Some(BlockHash(0x12345678)),
+    };
+
+    // Add to pending votes
+    pending.tr_1.insert(non_existent_block.clone(), true);
+    pending.dirty = true;
+
+    // Check for invariant violation - should be PendingVotesBlockNotFound
+    let violations = process.check_invariants();
+    let has_block_not_found = violations.iter().any(|v| {
+        if let InvariantViolation::PendingVotesBlockNotFound {
+            view,
+            block_key,
+            vote_type,
+        } = v
+        {
+            view == &current_view && block_key == &non_existent_block && vote_type == "tr_1"
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        has_block_not_found,
+        "Expected PendingVotesBlockNotFound invariant violation not found in: {:?}",
+        violations
+    );
+
+    // Clean up and test with a finalized block
+    process.pending_votes.clear();
+
+    // Create a simple block and mark it as finalized
+    let block_key = BlockKey {
+        type_: BlockType::Tr,
+        view: current_view,
+        height: 1,
+        author: Some(Identity(1)),
+        slot: SlotNum(1),
+        hash: Some(BlockHash(0xABCDEF)),
+    };
+
+    // Add this block to the process's state
+    let block = Signed {
+        data: Block {
+            key: block_key.clone(),
+            prev: vec![],
+            one: ThreshSigned {
+                data: VoteData {
+                    z: 1,
+                    for_which: GEN_BLOCK_KEY.clone(),
+                },
+                signature: ThreshSignature {},
+            },
+            data: BlockData::Tr {
+                transactions: vec![],
+            },
+        },
+        author: Identity(1),
+        signature: Signature {},
+    };
+
+    // Add the block to the process
+    process.record_block(&Arc::new(block));
+
+    // Mark the block as finalized
+    process.finalized.insert(block_key.clone(), true);
+
+    // Add to pending votes
+    let pending = process.pending_votes.entry(current_view).or_default();
+    pending.tr_1.insert(block_key.clone(), true);
+    pending.dirty = true;
+
+    // Check for invariant violation - should be PendingVotesForFinalizedBlock
+    let violations = process.check_invariants();
+    let has_finalized_violation = violations.iter().any(|v| {
+        if let InvariantViolation::PendingVotesForFinalizedBlock {
+            view,
+            block_key: vio_key,
+            vote_type,
+        } = v
+        {
+            view == &current_view && vio_key == &block_key && vote_type == "tr_1"
+        } else {
+            false
+        }
+    });
+
+    assert!(
+        has_finalized_violation,
+        "Expected PendingVotesForFinalizedBlock invariant violation not found in: {:?}",
+        violations
+    );
+}

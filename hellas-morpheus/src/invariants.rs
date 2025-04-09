@@ -129,6 +129,28 @@ pub enum InvariantViolation {
     MissingQCDespiteQuorum {
         vote_data: VoteData,
     },
+
+    // Pending votes consistency
+    PendingVotesBlockNotFound {
+        view: ViewNum,
+        block_key: BlockKey,
+        vote_type: String,
+    },
+    PendingVotesForFinalizedBlock {
+        view: ViewNum,
+        block_key: BlockKey,
+        vote_type: String,
+    },
+    PendingVotesMissingEligibleBlock {
+        view: ViewNum,
+        block_key: BlockKey,
+        vote_type: String,
+    },
+    PendingVotesAlreadyVoted {
+        view: ViewNum,
+        block_key: BlockKey,
+        vote_type: String,
+    },
 }
 
 impl fmt::Display for InvariantViolation {
@@ -332,6 +354,54 @@ impl fmt::Display for InvariantViolation {
                 f,
                 "Quorum present for {:?} but no corresponding QC found",
                 format_vote_data(vote_data, false)
+            ),
+
+            Self::PendingVotesBlockNotFound {
+                view,
+                block_key,
+                vote_type,
+            } => write!(
+                f,
+                "Block {:?} in pending_votes.{} for view {} doesn't exist in blocks",
+                format_block_key(block_key),
+                vote_type,
+                view.0
+            ),
+
+            Self::PendingVotesForFinalizedBlock {
+                view,
+                block_key,
+                vote_type,
+            } => write!(
+                f,
+                "Block {:?} in pending_votes.{} for view {} is already finalized",
+                format_block_key(block_key),
+                vote_type,
+                view.0
+            ),
+
+            Self::PendingVotesMissingEligibleBlock {
+                view,
+                block_key,
+                vote_type,
+            } => write!(
+                f,
+                "Eligible block {:?} for {} vote in view {} not in pending_votes",
+                format_block_key(block_key),
+                vote_type,
+                view.0
+            ),
+
+            Self::PendingVotesAlreadyVoted {
+                view,
+                block_key,
+                vote_type,
+            } => write!(
+                f,
+                "Block {:?} in pending_votes.{} for view {:?} has already voted",
+                format_block_key(block_key),
+                vote_type,
+                view,
             ),
         }
     }
@@ -687,6 +757,173 @@ impl MorpheusProcess {
                     received_count,
                     tracked_count,
                 });
+            }
+        }
+
+        for (view, pending) in &self.pending_votes {
+            for block_key in pending.tr_1.keys() {
+                if !self.blocks.contains_key(block_key) {
+                    violations.push(InvariantViolation::PendingVotesBlockNotFound {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "tr_1".to_string(),
+                    });
+                    continue;
+                }
+
+                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                    violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "tr_1".to_string(),
+                    });
+                }
+
+                if self.voted_i.contains(&(
+                    1,
+                    block_key.type_,
+                    block_key.slot,
+                    block_key.author.clone().unwrap(),
+                )) {
+                    violations.push(InvariantViolation::PendingVotesAlreadyVoted {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "tr_1".to_string(),
+                    });
+                }
+            }
+
+            for block_key in pending.tr_2.keys() {
+                if !self.blocks.contains_key(block_key) {
+                    violations.push(InvariantViolation::PendingVotesBlockNotFound {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "tr_2".to_string(),
+                    });
+                    continue;
+                }
+
+                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                    violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "tr_2".to_string(),
+                    });
+                }
+                if self.voted_i.contains(&(
+                    2,
+                    block_key.type_,
+                    block_key.slot,
+                    block_key.author.clone().unwrap(),
+                )) {
+                    violations.push(InvariantViolation::PendingVotesAlreadyVoted {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "tr_2".to_string(),
+                    });
+                }
+            }
+
+            for block_key in pending.lead_1.keys() {
+                if !self.blocks.contains_key(block_key) {
+                    violations.push(InvariantViolation::PendingVotesBlockNotFound {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "lead_1".to_string(),
+                    });
+                    continue;
+                }
+
+                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                    violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "lead_1".to_string(),
+                    });
+                }
+
+                if self.voted_i.contains(&(
+                    1,
+                    block_key.type_,
+                    block_key.slot,
+                    block_key.author.clone().unwrap(),
+                )) {
+                    violations.push(InvariantViolation::PendingVotesAlreadyVoted {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "lead_1".to_string(),
+                    });
+                }
+            }
+
+            for block_key in pending.lead_2.keys() {
+                if !self.blocks.contains_key(block_key) {
+                    violations.push(InvariantViolation::PendingVotesBlockNotFound {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "lead_2".to_string(),
+                    });
+                    continue;
+                }
+
+                if self.finalized.get(block_key).cloned().unwrap_or(false) {
+                    violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "lead_2".to_string(),
+                    });
+                }
+
+                if self.voted_i.contains(&(
+                    2,
+                    block_key.type_,
+                    block_key.slot,
+                    block_key.author.clone().unwrap(),
+                )) {
+                    violations.push(InvariantViolation::PendingVotesAlreadyVoted {
+                        view: *view,
+                        block_key: block_key.clone(),
+                        vote_type: "lead_2".to_string(),
+                    });
+                }
+            }
+
+            // For the current view, check if all eligible blocks are in pending_votes
+            if *view == self.view_i {
+                for (block_key, _) in &self.blocks {
+                    if block_key.type_ == BlockType::Tr
+                        && block_key.view == self.view_i
+                        && !self.finalized.get(block_key).cloned().unwrap_or(false)
+                        && self.is_eligible_for_tr_1_vote(block_key)
+                        && !pending.tr_1.contains_key(block_key)
+                    {
+                        violations.push(InvariantViolation::PendingVotesMissingEligibleBlock {
+                            view: *view,
+                            block_key: block_key.clone(),
+                            vote_type: "tr_1".to_string(),
+                        });
+                    }
+                }
+
+                for (vote_data, _) in &self.qcs {
+                    if vote_data.z == 1
+                        && vote_data.for_which.type_ == BlockType::Tr
+                        && vote_data.for_which.view == self.view_i
+                        && !self
+                            .finalized
+                            .get(&vote_data.for_which)
+                            .cloned()
+                            .unwrap_or(false)
+                        && self.is_eligible_for_tr_2_vote(&vote_data.for_which)
+                        && !pending.tr_2.contains_key(&vote_data.for_which)
+                    {
+                        violations.push(InvariantViolation::PendingVotesMissingEligibleBlock {
+                            view: *view,
+                            block_key: vote_data.for_which.clone(),
+                            vote_type: "tr_2".to_string(),
+                        });
+                    }
+                }
             }
         }
 

@@ -92,13 +92,6 @@ impl MorpheusProcess {
     /// "For z ∈ {0,1,2}, if p_i receives a z-quorum or a z-QC for b,
     /// and if Q_i does not contain a z-QC for b, then p_i automatically
     /// enumerates a z-QC for b into Q_i"
-    ///
-    /// There is a substantial amount of intricate code here that attempts to
-    /// incrementally/lazily compute the appropriate messages to send based on
-    /// indices and the current message being processed.
-    ///
-    /// It's not clear that this is correct, and it may even be slower than a
-    /// more naive approach if the set sizes were kept small.
     pub fn record_qc(&mut self, qc: &Arc<ThreshSigned<VoteData>>) {
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
@@ -212,7 +205,6 @@ impl MorpheusProcess {
                 .dirty = true;
         }
 
-        // Check if we need to vote for a leader block
         if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Lead {
             let pending = self
                 .pending_votes
@@ -222,7 +214,6 @@ impl MorpheusProcess {
             pending.dirty = true;
         }
 
-        // Instead of eagerly voting for transaction blocks, mark them as pending for evaluation
         if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Tr {
             let pending = self
                 .pending_votes
@@ -468,7 +459,7 @@ impl MorpheusProcess {
     }
 
     /// Helper method to check if a transaction block is eligible for a 1-vote
-    fn is_eligible_for_tr_1_vote(&self, block_key: &BlockKey) -> bool {
+    pub(crate) fn is_eligible_for_tr_1_vote(&self, block_key: &BlockKey) -> bool {
         // Check if this block is a single tip
         let has_single_tip = self.tips.len() == 1
             && self
@@ -489,7 +480,7 @@ impl MorpheusProcess {
     }
 
     /// Helper method to check if a transaction block is eligible for a 2-vote
-    fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
+    pub(crate) fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
         // Find the QC for this block
         let qc_data_opt = self
             .qcs

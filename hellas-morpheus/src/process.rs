@@ -86,18 +86,6 @@ pub struct MorpheusProcess {
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
 
-    /// Tracks the maximum view seen and its associated VoteData
-    pub max_view: (ViewNum, VoteData),
-
-    /// Tracks the maximum height block seen and its key
-    /// Used for identifying the tallest block in the DAG
-    pub max_height: (usize, BlockKey),
-
-    /// Stores the maximum 1-QC seen by this process
-    /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v),
-    /// where q' is a maximal amongst 1-QCs seen by p_i"
-    pub max_1qc: Arc<ThreshSigned<VoteData>>,
-
     /// Stores all 1-QCs seen by this process
     pub all_1qc: BTreeSet<Arc<ThreshSigned<VoteData>>>,
 
@@ -110,10 +98,23 @@ pub struct MorpheusProcess {
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub blocks: BTreeMap<BlockKey, Arc<Signed<Block>>>,
 
+    // === Performance optimization indexes ===
     /// Tracks which blocks point to which other blocks
     /// Used to efficiently determine the DAG structure
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub block_pointed_by: BTreeMap<BlockKey, BTreeSet<BlockKey>>,
+
+    /// Tracks the maximum view seen and its associated VoteData
+    pub max_view: (ViewNum, VoteData),
+
+    /// Tracks the maximum height block seen and its key
+    /// Used for identifying the tallest block in the DAG
+    pub max_height: (usize, BlockKey),
+
+    /// Stores the maximum 1-QC seen by this process
+    /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v),
+    /// where q' is a maximal amongst 1-QCs seen by p_i"
+    pub max_1qc: Arc<ThreshSigned<VoteData>>,
 
     /// Tracks unfinalized blocks with 2-QC
     /// Used to identify blocks that have 2-QC but are not yet finalized
@@ -139,7 +140,6 @@ pub struct MorpheusProcess {
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
 
-    // === Performance optimization indexes ===
     /// Quick index to QCs by block type, author, and slot
     /// Enables O(1) lookup of QCs
     #[serde(with = "serde_json_any_key::any_key_map")]
@@ -503,10 +503,7 @@ impl MorpheusProcess {
         self.view_entry_time = self.current_time;
 
         // View changed, we need to re-evaluate pending votes
-        self.pending_votes
-            .entry(new_view)
-            .or_default()
-            .dirty = true;
+        self.pending_votes.entry(new_view).or_default().dirty = true;
 
         self.send_msg(to_send, (cause, None));
 
