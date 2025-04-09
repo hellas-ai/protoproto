@@ -195,7 +195,11 @@ impl MorpheusProcess {
         }
         let block = &block.data;
         let author = if let BlockType::Genesis = block.key.type_ {
-            if block.key == GEN_BLOCK_KEY && block.prev.is_empty() {
+            if block.key == GEN_BLOCK_KEY
+                && block.prev.is_empty()
+                && block.one == *self.genesis_qc
+                && block.data == BlockData::Genesis
+            {
                 return Ok(());
             } else {
                 return Err(BlockValidationError::InvalidGenesisBlock {
@@ -266,14 +270,7 @@ impl MorpheusProcess {
         }
 
         match &block.data {
-            BlockData::Genesis => {
-                if block.key.type_ != BlockType::Genesis {
-                    return Err(BlockValidationError::BlockDataTypeMismatch {
-                        key_type: block.key.type_,
-                        data_type: BlockType::Genesis,
-                    });
-                }
-            }
+            BlockData::Genesis => unreachable!("genesis blocks are validated above"),
             BlockData::Tr { transactions } => {
                 if block.key.type_ != BlockType::Tr {
                     return Err(BlockValidationError::BlockDataTypeMismatch {
