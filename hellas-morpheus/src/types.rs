@@ -5,6 +5,7 @@ use std::sync::Arc;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum BlockType {
     Genesis,
+    // IMPORTANT: Lead must be ordered before Tr
     Lead,
     Tr,
 }

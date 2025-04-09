@@ -96,6 +96,7 @@ impl MorpheusProcess {
         crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
         if self.qcs.contains_key(&qc.data) {
+            tracing::warn!("recording duplicate qc for {:?}", qc.data);
             return;
         }
 
@@ -129,6 +130,8 @@ impl MorpheusProcess {
         if qc.data.z == 1 {
             self.all_1qc.insert(qc.clone());
 
+            // FIXME: should we compare against tips? all_1qc? max_1qc should be a chain,
+            // but maybe
             if self.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
                 tracing_setup::protocol_transition(
                     &self.id,
@@ -174,9 +177,6 @@ impl MorpheusProcess {
         }
 
         self.qcs.insert(qc.data.clone(), qc.clone());
-        if qc.data.z == 2 {
-            self.unfinalized_2qc.insert(qc.data.clone());
-        }
 
         // now find all the waiting 2-qcs that this qc can finalize
         // TODO: justify why this is correct according to the paper.
@@ -187,6 +187,12 @@ impl MorpheusProcess {
             .cloned()
             .filter(|unfinalized_2qc| self.observes(qc.data.clone(), unfinalized_2qc))
             .collect::<BTreeSet<_>>();
+
+        if qc.data.z == 2 {
+            // IMPORTANT: QC observes itself, so make sure we add it AFTER we scan,
+            // otherwise this block will finalize itself.
+            self.unfinalized_2qc.insert(qc.data.clone());
+        }
 
         self.unfinalized_2qc
             .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
@@ -205,22 +211,17 @@ impl MorpheusProcess {
                 .dirty = true;
         }
 
-        if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Lead {
+        if qc.data.z == 1 {
             let pending = self
                 .pending_votes
                 .entry(qc.data.for_which.view)
                 .or_default();
-            pending.lead_2.insert(qc.data.for_which.clone(), true);
             pending.dirty = true;
-        }
-
-        if qc.data.z == 1 && qc.data.for_which.type_ == BlockType::Tr {
-            let pending = self
-                .pending_votes
-                .entry(qc.data.for_which.view)
-                .or_default();
-            pending.tr_2.insert(qc.data.for_which.clone(), true);
-            pending.dirty = true;
+            match qc.data.for_which.type_ {
+                BlockType::Lead => pending.lead_2.insert(qc.data.for_which.clone(), true),
+                BlockType::Tr => pending.tr_2.insert(qc.data.for_which.clone(), true),
+                BlockType::Genesis => unreachable!(),
+            };
         }
     }
 
@@ -319,26 +320,26 @@ impl MorpheusProcess {
     /// Determines if one QC directly observes another (without transitivity)
     ///
     /// Implements the direct observation component of the observes relation ⪰
-    pub fn directly_observes(&self, qc1: &VoteData, qc2: &VoteData) -> bool {
-        if qc1.for_which.type_ == qc2.for_which.type_
-            && qc1.for_which.author == qc2.for_which.author
-            && qc1.for_which.slot > qc2.for_which.slot
+    pub fn directly_observes(&self, looks: &VoteData, seen: &VoteData) -> bool {
+        if looks.for_which.type_ == seen.for_which.type_
+            && looks.for_which.author == seen.for_which.author
+            && looks.for_which.slot > seen.for_which.slot
         {
             return true;
         }
-        if qc1.for_which.type_ == qc2.for_which.type_
-            && qc1.for_which.author == qc2.for_which.author
-            && qc1.for_which.slot == qc2.for_which.slot
-            && qc1.z >= qc2.z
+        if looks.for_which.type_ == seen.for_which.type_
+            && looks.for_which.author == seen.for_which.author
+            && looks.for_which.slot == seen.for_which.slot
+            && looks.z >= seen.z
         {
             return true;
         }
-        if let Some(block) = self.blocks.get(&qc1.for_which) {
+        if let Some(block) = self.blocks.get(&looks.for_which) {
             if block
                 .data
                 .prev
                 .iter()
-                .any(|prev| prev.data.for_which == qc2.for_which)
+                .any(|prev| prev.data.for_which == seen.for_which)
             {
                 return true;
             }
@@ -395,7 +396,6 @@ impl MorpheusProcess {
 
         // Process leader block votes if we're still in high throughput phase
         if self.phase_i.get(&current_view).unwrap_or(&Phase::High) == &Phase::High {
-            // Process leader block votes (1-votes and 2-votes)
             self.process_block_votes(
                 1,
                 &mut pending.lead_1,
@@ -433,11 +433,10 @@ impl MorpheusProcess {
         let mut processed_keys = Vec::new();
 
         for block_key in pending_votes.keys().cloned() {
-            // Check if this block is eligible for voting
             if eligibility_check(self, &block_key) {
                 if self.try_vote(vote_level, &block_key, None, to_send) {
-                    // If we voted for a transaction block, transition to low throughput phase
                     if block_key.type_ == BlockType::Tr && phase_transition_reason.is_some() {
+                        // If we voted for a transaction block, transition to low throughput phase
                         crate::tracing_setup::protocol_transition(
                             &self.id,
                             "throughput phase",
@@ -447,58 +446,56 @@ impl MorpheusProcess {
                         );
                         self.set_phase(Phase::Low);
                     }
+                    processed_keys.push(block_key);
+                } else {
+                    panic!(
+                        "Already {}-voted {:?}, pending votes desync bug",
+                        vote_level, block_key
+                    );
                 }
-                processed_keys.push(block_key);
             }
         }
 
-        // Remove processed keys
-        for key in processed_keys {
-            pending_votes.remove(&key);
+        pending_votes.retain(|key, _| !processed_keys.contains(&key));
+    }
+
+    fn block_is_single_tip(&self, block_key: &BlockKey) -> bool {
+        if self.tips.len() != 1 {
+            return false;
+        }
+        match self.tips.get(0) {
+            Some(tip) => self
+                .block_pointed_by
+                .get(&tip.for_which)
+                .map_or(false, |parents| {
+                    parents.len() == 1 && parents.first().unwrap() == block_key
+                }),
+            None => false,
         }
     }
 
-    /// Helper method to check if a transaction block is eligible for a 1-vote
     pub(crate) fn is_eligible_for_tr_1_vote(&self, block_key: &BlockKey) -> bool {
-        // Check if this block is a single tip
-        let has_single_tip = self.tips.len() == 1
-            && self
-                .tips
-                .get(0)
-                .map_or(false, |tip| tip.for_which == *block_key);
+        let has_single_tip = self.block_is_single_tip(block_key);
 
         if !has_single_tip || !self.blocks.contains_key(block_key) {
             return false;
         }
 
-        // Check if the block's 1-QC is valid
         let block = self.blocks.get(block_key).unwrap();
-        self.qcs
-            .values()
-            .filter(|qc| qc.data.z == 1)
+        self.all_1qc
+            .iter()
             .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
     }
 
-    /// Helper method to check if a transaction block is eligible for a 2-vote
     pub(crate) fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
-        // Find the QC for this block
-        let qc_data_opt = self
-            .qcs
-            .keys()
-            .find(|q| q.for_which == *block_key && q.z == 1)
-            .cloned();
+        let has_single_tip = self.tips.len() == 1
+            && self
+                .tips
+                .get(0)
+                .map_or(false, |tip| tip.z == 1 && tip.for_which.eq(block_key));
 
-        if let Some(qc_data) = qc_data_opt {
-            // Check if this QC is a single tip
-            let has_single_tip =
-                self.tips.len() == 1 && self.tips.get(0).map_or(false, |tip| tip == &qc_data);
+        let no_higher_blocks = self.max_height.0 <= block_key.height;
 
-            // Check if there are no blocks with greater height
-            let no_higher_blocks = self.max_height.0 <= block_key.height;
-
-            has_single_tip && no_higher_blocks && block_key.type_ == BlockType::Tr
-        } else {
-            false
-        }
+        has_single_tip && no_higher_blocks
     }
 }
