@@ -246,7 +246,7 @@ impl MorpheusProcess {
         Identity((view.0 as u64 % self.n as u64) + 1) // identities are 1-indexed... ok
     }
 
-    #[tracing::instrument(skip(self, to_send), fields(process_id = ?self.id))]
+    #[tracing::instrument(skip(self, sender, to_send), fields(process_id = ?self.id))]
     pub fn process_message(
         &mut self,
         message: Message,
@@ -256,10 +256,11 @@ impl MorpheusProcess {
         // Check if we've seen this message before (duplicate detection)
         if cfg!(debug_assertions) {
             if self.received_messages.contains(&message) {
-                tracing::debug!(
-                    process_id = ?self.id,
-                    message = format_message(&message, true),
-                    "Ignoring duplicate message"
+                tracing::error!(
+                    target: "duplicate_message",
+                    sender = ?sender,
+                    full_message = format_message(&message, true),
+                    "Ignoring duplicate message: why did we receive it?"
                 );
                 return false;
             }
@@ -267,15 +268,16 @@ impl MorpheusProcess {
 
         // Record that we've received this message
         self.received_messages.insert(message.clone());
+        tracing::debug!("received a message");
 
         match message {
             Message::Block(block) => {
                 if let Err(error) = self.block_valid(&block) {
                     tracing::error!(
+                        target: "invalid_block",
                         process_id = ?self.id,
-                        block = ?block.data.key,
+                        block_key = ?block.data.key,
                         error = ?error,
-                        "Received invalid block"
                     );
                     return false;
                 }
@@ -286,11 +288,8 @@ impl MorpheusProcess {
                     to_send,
                 );
                 tracing::debug!(
-                    process_id = ?self.id,
+                    target: "valid_block",
                     block_key = ?block.data.key,
-                    block_type = ?block.data.key.type_,
-                    view = ?block.data.key.view,
-                    "Processing valid block"
                 );
                 self.record_block(&block);
             }

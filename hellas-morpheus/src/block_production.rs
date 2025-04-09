@@ -78,7 +78,7 @@ impl MorpheusProcess {
             height,
             author: Some(self.id.clone()),
             slot,
-            hash: Some(BlockHash(self.slot_i_tr.0)),
+            hash: Some(BlockHash(self.id.0 * 0x100 + self.slot_i_tr.0)),
         };
 
         let block = Block {

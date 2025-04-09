@@ -166,7 +166,7 @@ pub enum Message {
 
 impl std::fmt::Debug for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", format::format_message(self, true))
+        write!(f, "{:?}", format::format_message(self, false))
     }
 }
 

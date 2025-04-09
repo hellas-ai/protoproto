@@ -152,6 +152,7 @@ impl MorpheusProcess {
         target: Option<Identity>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
+        tracing::debug!(target: "try_vote", z = z, block = ?block, target = ?target);
         let author = block.author.clone().expect("not voting for genesis block");
 
         if !self
@@ -183,6 +184,7 @@ impl MorpheusProcess {
         vote_data: &Arc<Signed<VoteData>>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
+        tracing::debug!(target: "record_vote", vote_data = ?vote_data.data);
         match self.vote_tracker.record_vote(vote_data.clone()) {
             Ok(num_votes) => {
                 if num_votes == self.n - self.f {
@@ -196,6 +198,11 @@ impl MorpheusProcess {
                         && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
                     {
                         self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
+                        crate::tracing_setup::qc_formed(
+                            &self.id,
+                            vote_data.data.z,
+                            &vote_data.data,
+                        );
                         self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
                     }
                     self.record_qc(&quorum_formed);
@@ -203,10 +210,10 @@ impl MorpheusProcess {
                 true
             }
             Err(Duplicate) => {
-                tracing::warn!(
-                    "Duplicate vote for {:?} from {:?}",
-                    vote_data.data,
-                    vote_data.author
+                tracing::error!(
+                    target: "duplicate_vote",
+                    vote_data = ?vote_data.data,
+                    author = ?vote_data.author
                 );
                 false
             }
@@ -223,8 +230,6 @@ impl MorpheusProcess {
         if self.index.qcs.contains_key(&qc.data) {
             return;
         }
-
-        crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
         // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
@@ -286,12 +291,14 @@ impl MorpheusProcess {
             // in favor of the new qc
             if self.observes(qc.data.clone(), tip) {
                 tips_to_yeet.insert(tip.clone());
+                tracing::info!(target: "yeet_tip", new_tip = ?qc.data, old_tip = ?tip);
             }
         }
         if !tips_to_yeet.is_empty() {
             // this qc is a new tip because it observes some existing tips
             self.index.tips.retain(|tip| !tips_to_yeet.contains(tip));
             self.index.tips.push(qc.data.clone());
+            tracing::info!(target: "new_tip", qc = ?qc.data);
         } else {
             // this qc still might be a new tip if none of the existing tips observe it
             if !self
@@ -302,6 +309,7 @@ impl MorpheusProcess {
                 .any(|tip| self.observes(tip, &qc.data))
             {
                 self.index.tips.push(qc.data.clone());
+                tracing::info!(target: "new_tip", qc = ?qc.data);
             }
         }
 
@@ -329,6 +337,7 @@ impl MorpheusProcess {
             .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
 
         for finalized in finalized_here {
+            tracing::debug!(target: "finalized", qc = ?finalized);
             self.index
                 .unfinalized_lead_by_view
                 .entry(finalized.for_which.view)
@@ -367,12 +376,12 @@ impl MorpheusProcess {
     ///
     /// It will also record any QCs that are used as pointers in the block.
     pub fn record_block(&mut self, block: &Arc<Signed<Block>>) {
-        tracing::info!("recording block {:?}", block.data.key);
         if self.index.blocks.contains_key(&block.data.key) {
-            tracing::warn!("recording duplicate block {:?}", block.data.key);
+            tracing::warn!(target: "duplicate_block", key = ?block.data.key);
             return;
         }
         if block.data.key.height > self.index.max_height.0 {
+            tracing::debug!(target: "new_max_height", height = block.data.key.height, key = ?block.data.key);
             self.index.max_height = (block.data.key.height, block.data.key.clone());
         }
         if let Some(author) = &block.data.key.author {

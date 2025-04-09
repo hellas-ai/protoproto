@@ -2,7 +2,7 @@ use tracing::{debug, error, info};
 
 /// Register a new Morpheus process with tracing
 pub fn register_process(id: &crate::Identity, n: usize, f: usize) {
-    info!(process_id = ?id, total_processes = n, max_faulty = f, "Creating new Morpheus process");
+    info!(target: "register_process", process_id = ?id, total_processes = n, max_faulty = f);
 }
 
 /// Track protocol transitions such as view changes
@@ -15,20 +15,20 @@ pub fn protocol_transition(
 ) {
     if let Some(reason) = reason {
         info!(
+            target: "protocol_transition",
             process_id = ?process_id,
             transition = transition_type,
             from = ?from,
             to = ?to,
             reason = reason,
-            "Protocol state transition"
         );
     } else {
         info!(
+            target: "protocol_transition",
             process_id = ?process_id,
             transition = transition_type,
             from = ?from,
             to = ?to,
-            "Protocol state transition"
         );
     }
 }
@@ -42,19 +42,19 @@ pub fn message_sent(
 ) {
     if let Some(to) = to {
         debug!(
+            target: "message_sent",
             from = ?from,
             to = ?to,
             message_type = message_type,
             message = ?message,
-            "Message sent"
         );
     } else {
         debug!(
+            target: "message_sent",
             from = ?from,
             to = "broadcast",
             message_type = message_type,
             message = ?message,
-            "Message broadcast"
         );
     }
 }
@@ -62,29 +62,29 @@ pub fn message_sent(
 /// Track block creation events
 pub fn block_created(author: &crate::Identity, block_type: &str, block: impl std::fmt::Debug) {
     info!(
+        target: "block_created",
         author = ?author,
         block_type = block_type,
         block = ?block,
-        "Block created"
     );
 }
 
 /// Track QC formation events
 pub fn qc_formed(process_id: &crate::Identity, qc_type: u8, qc: impl std::fmt::Debug) {
     info!(
+        target: "qc_formed",
         process_id = ?process_id,
         qc_type = qc_type,
         qc = ?qc,
-        "Quorum certificate formed"
     );
 }
 
 /// Track block finalization events
 pub fn block_finalized(process_id: &crate::Identity, block_key: impl std::fmt::Debug) {
     info!(
+        target: "block_finalized",
         process_id = ?process_id,
         block_key = ?block_key,
-        "Block finalized"
     );
 }
 
@@ -95,9 +95,9 @@ pub fn protocol_error(
     details: impl std::fmt::Debug,
 ) {
     error!(
+        target: "protocol_error",
         process_id = ?process_id,
         error_type = error_type,
         details = ?details,
-        "Protocol error occurred"
     );
 }
