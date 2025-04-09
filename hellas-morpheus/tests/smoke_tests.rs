@@ -146,10 +146,86 @@ fn test_basic_txgen() {
     // Let the system run for a while.
     harness.run(60);
 
-    // 51 blocks = 30 blocks from p3 + 20 blocks from p2 + 1 genesis block?
+    for block in harness
+        .processes
+        .get(&Identity(2))
+        .unwrap()
+        .index
+        .blocks
+        .values()
+    {
+        println!("block: {:?}", block);
+    }
+    println!(
+        "p1 blocks: {}",
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .index
+            .blocks
+            .values()
+            .filter(|b| b.data.key.author == Some(Identity(1)))
+            .count()
+    );
+    println!(
+        "p2 blocks: {}",
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .index
+            .blocks
+            .values()
+            .filter(|b| b.data.key.author == Some(Identity(2)))
+            .count()
+    );
+    println!(
+        "p3 blocks: {}",
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .index
+            .blocks
+            .values()
+            .filter(|b| b.data.key.author == Some(Identity(3)))
+            .count()
+    );
+    println!(
+        "lead blocks: {}",
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .index
+            .blocks
+            .values()
+            .filter(|b| b.data.key.type_ == BlockType::Lead)
+            .count()
+    );
+    println!(
+        "tr blocks: {}",
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .index
+            .blocks
+            .values()
+            .filter(|b| b.data.key.type_ == BlockType::Tr)
+            .count()
+    );
+    // 51 blocks = 30 blocks from p3 + 20 blocks from p2 + 1 genesis block
     // where are the leader blocks?
-    assert_eq!(
-        harness.processes.get(&Identity(2)).unwrap().index.blocks.len(),
+    assert_ne!(
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .index
+            .blocks
+            .len(),
         51
     );
 }

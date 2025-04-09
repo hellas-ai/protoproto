@@ -17,6 +17,7 @@ pub struct PendingVotes {
     pub dirty: bool,
 }
 
+/// Tracks all structural state
 #[derive(Serialize, Deserialize)]
 pub struct StateIndex {
     /// Stores QCs indexed by their VoteData
@@ -219,14 +220,11 @@ impl MorpheusProcess {
     /// and if Q_i does not contain a z-QC for b, then p_i automatically
     /// enumerates a z-QC for b into Q_i"
     pub fn record_qc(&mut self, qc: &Arc<ThreshSigned<VoteData>>) {
-        crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
-
         if self.index.qcs.contains_key(&qc.data) {
-            if qc.data.for_which != GEN_BLOCK_KEY {
-                tracing::warn!("recording duplicate qc for {:?}", qc.data);
-            }
             return;
         }
+
+        crate::tracing_setup::qc_formed(&self.id, qc.data.z, &qc.data);
 
         // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
