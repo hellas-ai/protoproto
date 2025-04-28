@@ -264,7 +264,7 @@ impl MorpheusProcess {
 
             // FIXME: should we compare against tips? all_1qc? max_1qc should be a chain,
             // but maybe
-            if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Less {
+            if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Greater {
                 tracing_setup::protocol_transition(
                     &self.id,
                     "updating max 1-QC",

@@ -85,6 +85,7 @@ pub struct MorpheusProcess {
     pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
     pub index: StateIndex,
+
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
     #[serde(with = "serde_json_any_key::any_key_map")]
