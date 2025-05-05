@@ -1,7 +1,5 @@
 use hellas_morpheus::{
-    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase,
-    Signature, Signed, SlotNum, StartView, ThreshSignature, ThreshSigned, Transaction, ViewNum,
-    VoteData,
+    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase, Signed, SlotNum, StartView, ThreshPartial, ThreshSigned, Transaction, ViewNum, VoteData
 };
 use std::sync::Arc;
 
@@ -28,15 +26,15 @@ fn test_format_functions() {
         for_which: block_key.clone(),
     };
 
-    let signed_vote = Signed {
+    let signed_vote = ThreshPartial {
         data: vote_data.clone(),
         author: identity.clone(),
-        signature: Signature {},
+        signature: hints::PartialSignature::default(),
     };
 
     let thresh_signed_vote = ThreshSigned {
         data: vote_data.clone(),
-        signature: ThreshSignature {},
+        signature: hints::Signature::default(),
     };
 
     // Create a block
@@ -52,7 +50,7 @@ fn test_format_functions() {
     let signed_block = Arc::new(Signed {
         data: block.clone(),
         author: identity.clone(),
-        signature: Signature {},
+        signature: hints::PartialSignature::default(),
     });
 
     // Create various messages
@@ -60,14 +58,14 @@ fn test_format_functions() {
         Message::Block(signed_block.clone()),
         Message::NewVote(Arc::new(signed_vote.clone())),
         Message::QC(Arc::new(thresh_signed_vote.clone())),
-        Message::EndView(Arc::new(Signed {
+        Message::EndView(Arc::new(ThreshPartial {
             data: view_num,
             author: identity.clone(),
-            signature: Signature {},
+            signature: hints::PartialSignature::default(),
         })),
         Message::EndViewCert(Arc::new(ThreshSigned {
             data: view_num,
-            signature: ThreshSignature {},
+            signature: hints::Signature::default(),
         })),
         Message::StartView(Arc::new(Signed {
             data: StartView {
@@ -75,7 +73,7 @@ fn test_format_functions() {
                 qc: thresh_signed_vote.clone(),
             },
             author: identity.clone(),
-            signature: Signature {},
+            signature: hints::PartialSignature::default(),
         })),
     ];
 
@@ -102,7 +100,7 @@ fn test_format_functions() {
     println!("VoteData: {}", format_vote_data(&vote_data, false));
     println!(
         "Signed<VoteData>: {}",
-        format_signed(&signed_vote, |vd| format_vote_data(vd, false), false)
+        format_thresh_partial(&signed_vote, |vd| format_vote_data(vd, false), false)
     );
     println!(
         "ThreshSigned<VoteData>: {}",

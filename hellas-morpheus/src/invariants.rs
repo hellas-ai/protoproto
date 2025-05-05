@@ -119,7 +119,7 @@ pub enum InvariantViolation {
 
     // Vote tracking consistency
     UntrackedVote {
-        vote_data: Signed<VoteData>,
+        vote_data: ThreshPartial<VoteData>,
     },
     VoteCountMismatch {
         vote_data: VoteData,
@@ -517,7 +517,7 @@ impl MorpheusProcess {
                 vote_data.for_which.slot,
             );
             if let Some(indexed_qc) = self.index.qc_by_slot.get(&index_key) {
-                if &indexed_qc.data != vote_data {
+                if indexed_qc.data.for_which != vote_data.for_which {
                     violations.push(InvariantViolation::QcIndexMismatch {
                         qc_index_data: indexed_qc.data.clone(),
                         qc_data: vote_data.clone(),
@@ -741,7 +741,7 @@ impl MorpheusProcess {
                         .contains_key(&vote.author)
                     {
                         violations.push(InvariantViolation::UntrackedVote {
-                            vote_data: Signed::clone(&vote),
+                            vote_data: ThreshPartial::clone(&vote),
                         });
                     }
                 }

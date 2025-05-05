@@ -4,15 +4,20 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+hints = { path = "../hints" }
+
+ark-std = "0.5.0"
+ark-serialize = { version = "0.5.0", features = [ "serde_with" ] }
+ark-serialize-derive = { version = "0.5.0" }
 serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json_any_key = "2"
+
 tracing = "0.1"
+
 time = { version = "0.3.39", features = ["serde"] }
 test-log = { version = "0.2", features = ["trace"] }
-tsify-next = { version = "0.5.5", optional = true, default-features = false, features = ["js"] }
-wasm-bindgen = { version = "0.2", optional = true }
-serde_json_any_key = "2"
+
 [dev-dependencies]
-serde_json = "1.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

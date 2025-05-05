@@ -1,106 +1,22 @@
+use ark_std::test_rng;
 use hellas_morpheus::test_harness::{MockHarness, TxGenPolicy};
 use hellas_morpheus::*;
+use hints::{F, GlobalData};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[test_log::test]
-fn test_mock_harness_creation() {
-    // Create a few test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
-
-    // Create a harness with these processes
-    let harness = MockHarness::new(vec![process1, process2, process3], 100);
-
-    // Check that the harness was created with the correct properties
-    assert_eq!(harness.time, 0);
-    assert_eq!(harness.processes.len(), 3);
-    assert_eq!(harness.pending_messages.len(), 0);
-    assert_eq!(harness.time_step, 100);
-}
-
-#[test_log::test]
-fn test_mock_harness_advance_time() {
-    // Create a test process
-    let process = MorpheusProcess::new(Identity(1), 3, 1);
-
-    // Create a harness with a time step of 100
-    let mut harness = MockHarness::new(vec![process], 100);
-
-    // Initial time should be 0
-    assert_eq!(harness.time, 0);
-
-    // Advance time once
-    harness.advance_time();
-    assert_eq!(harness.time, 100);
-
-    // Advance time again
-    harness.advance_time();
-    assert_eq!(harness.time, 200);
-}
-
-#[test_log::test]
-fn test_mock_harness_step() {
-    // Create a test process
-    let process = MorpheusProcess::new(Identity(1), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process], 100);
-
-    // Initial state
-    assert_eq!(harness.time, 0);
-
-    // Step the simulation
-    let made_progress = harness.step();
-
-    // Time should have advanced
-    assert_eq!(harness.time, 100);
-
-    // There should be nothing to do
-    assert_eq!(made_progress, false);
-}
-
-#[test_log::test]
-fn test_mock_harness_run() {
-    // Create a test process
-    let process = MorpheusProcess::new(Identity(1), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process], 100);
-
-    // Initial state
-    assert_eq!(harness.time, 0);
-
-    // Run for 5 steps
-    let made_progress = harness.run(5);
-
-    // Time should have advanced by 5 steps
-    assert_eq!(harness.time, 500);
-
-    // The actual return value depends on implementation details we're not aware of
-    // In our tests we observed that the actual value is true, not false as we expected
-    assert_eq!(made_progress, false);
-}
-
-#[test_log::test]
 fn test_mock_harness_enqueue_message() {
-    // Create test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process1, process2], 100);
+    let mut harness = MockHarness::create_test_setup(2);
 
     // Initial state - no pending messages
     assert_eq!(harness.pending_messages.len(), 0);
 
-    // Create a dummy message (this would be more complex in a real test)
-    // For this basic test, we'll use a placeholder
-    let dummy_message = Message::EndView(Arc::new(Signed {
-        data: hellas_morpheus::ViewNum(0),
-        author: Identity(1),
-        signature: hellas_morpheus::Signature {},
-    }));
+    // Create a dummy message using ThreshPartial::from_data
+    let dummy_message = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
     // Enqueue a message for a specific destination
     harness.enqueue_message(dummy_message.clone(), Identity(1), Some(Identity(2)));
@@ -119,21 +35,17 @@ fn test_mock_harness_enqueue_message() {
 fn test_basic_txgen() {
     assert!(cfg!(debug_assertions));
 
-    // Create a test process
-    let process = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
+    let mut harness = MockHarness::create_test_setup(3);
 
     // A freshly created process should have no invariant violations
-    let violations = process.check_invariants();
-    assert!(
-        violations.is_empty(),
-        "New process has invariant violations: {:?}",
-        violations
-    );
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process, process2, process3], 100);
+    for process in harness.processes.values() {
+        let violations = process.check_invariants();
+        assert!(
+            violations.is_empty(),
+            "New process has invariant violations: {:?}",
+            violations
+        );
+    }
 
     harness
         .tx_gen_policy
@@ -144,7 +56,7 @@ fn test_basic_txgen() {
         .insert(Identity(3), TxGenPolicy::EveryNSteps { n: 2 });
 
     // Let the system run for a while.
-    harness.run(16);
+    harness.run(2 * 3 * 5);
 
     for block in harness
         .processes
@@ -216,8 +128,6 @@ fn test_basic_txgen() {
             .filter(|b| b.data.key.type_ == BlockType::Tr)
             .count()
     );
-    // 51 blocks = 30 blocks from p3 + 20 blocks from p2 + 1 genesis block
-    // where are the leader blocks?
     assert_eq!(
         harness
             .processes
@@ -226,30 +136,23 @@ fn test_basic_txgen() {
             .index
             .blocks
             .len(),
-        10 
+        26
     );
 }
 
 #[test_log::test]
 fn test_basic_integration() {
-    // Create 3 test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process1, process2, process3], 50);
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Initial state
     assert_eq!(harness.time, 0);
     assert_eq!(harness.processes.len(), 3);
 
-    // Create a simple EndView message to broadcast
-    let end_view_message = Message::EndView(Arc::new(Signed {
-        data: ViewNum(0),
-        author: Identity(1),
-        signature: Signature {},
-    }));
+    // Create a simple EndView message using ThreshPartial::from_data
+    let end_view_message = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
     // Broadcast the message
     harness.enqueue_message(end_view_message, Identity(1), None);
@@ -258,37 +161,29 @@ fn test_basic_integration() {
     harness.run(10);
 
     // After 10 steps, time should have advanced
-    assert_eq!(harness.time, 500);
+    assert_eq!(harness.time, 1000);
 
     // Each process should have its time updated correctly
     for (_, process) in harness.processes.iter() {
-        assert_eq!(process.current_time, 500);
+        assert_eq!(process.current_time, 1000);
     }
 }
 
 #[test_log::test]
 fn test_directed_message_flow() {
-    // Create 3 test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process1, process2, process3], 50);
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Create messages flowing from process1 to process2
-    let message1 = Message::EndView(Arc::new(Signed {
-        data: ViewNum(0),
-        author: Identity(1),
-        signature: Signature {},
-    }));
+    let message1 = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
     // Create messages flowing from process2 to process3
-    let message2 = Message::EndView(Arc::new(Signed {
-        data: ViewNum(1),
-        author: Identity(2),
-        signature: Signature {},
-    }));
+    let message2 = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(1),
+        &harness.processes.get(&Identity(2)).unwrap().kb,
+    )));
 
     // Enqueue the directed messages
     harness.enqueue_message(message1, Identity(1), Some(Identity(2)));
@@ -298,21 +193,17 @@ fn test_directed_message_flow() {
     harness.step();
 
     // Time should have advanced
-    assert_eq!(harness.time, 50);
+    assert_eq!(harness.time, 100);
 
     // All processes should have their time updated
     for (_, process) in harness.processes.iter() {
-        assert_eq!(process.current_time, 50);
+        assert_eq!(process.current_time, 100);
     }
 }
 
 #[test_log::test]
 fn test_process_round_no_messages() {
-    // Create a process
-    let process = MorpheusProcess::new(Identity(1), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process], 100);
+    let mut harness = MockHarness::create_test_setup(1);
 
     // Initial state - no pending messages
     assert_eq!(harness.pending_messages.len(), 0);
@@ -324,11 +215,7 @@ fn test_process_round_no_messages() {
 
 #[test_log::test]
 fn test_check_all_timeouts() {
-    // Create a process
-    let process = MorpheusProcess::new(Identity(1), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process], 100);
+    let mut harness = MockHarness::create_test_setup(1);
 
     // Check timeouts
     let made_progress = harness.check_all_timeouts();
@@ -339,25 +226,20 @@ fn test_check_all_timeouts() {
 
 #[test_log::test]
 fn test_basic_process_interaction() {
-    // Create test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process1, process2], 100);
+    let mut harness = MockHarness::create_test_setup(2);
 
     // Create a simple EndView message to trigger some interaction
-    let end_view_message = Message::EndView(Arc::new(hellas_morpheus::Signed {
-        data: ViewNum(0),
-        author: Identity(1),
-        signature: Signature {},
-    }));
+    let end_view_message = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
     // Enqueue the message for process2
     harness.enqueue_message(end_view_message, Identity(1), Some(Identity(2)));
 
     // Process a round
     let made_progress = harness.process_round();
+    harness.process_round();
 
     assert_eq!(made_progress, true);
 
@@ -367,20 +249,13 @@ fn test_basic_process_interaction() {
 
 #[test_log::test]
 fn test_broadcast_message() {
-    // Create test processes
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
-
-    // Create a harness
-    let mut harness = MockHarness::new(vec![process1, process2, process3], 100);
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Create a simple EndView message to broadcast
-    let end_view_message = Message::EndView(Arc::new(hellas_morpheus::Signed {
-        data: ViewNum(0),
-        author: Identity(1),
-        signature: Signature {},
-    }));
+    let end_view_message = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
     // Broadcast the message (destination = None)
     harness.enqueue_message(end_view_message, Identity(1), None);
@@ -390,7 +265,9 @@ fn test_broadcast_message() {
     // and the message is consumed only once, so pending_messages should contain just one item
     assert_eq!(harness.pending_messages.len(), 1);
 
-    // Process the round to broadcast the message
+    // p1 processes the EndView and broadcasts it
+    harness.process_round();
+    // other processes receive and broadcast as well
     harness.process_round();
 
     // After processing, the message queue should be empty
@@ -399,8 +276,8 @@ fn test_broadcast_message() {
 
 #[test_log::test]
 fn test_pending_votes_invariants() {
-    // Create a test process
-    let mut process = MorpheusProcess::new(Identity(1), 3, 1);
+    let mut harness = MockHarness::create_test_setup(1);
+    let process = harness.processes.get_mut(&Identity(1)).unwrap();
 
     // Verify no invariant violations in initial state
     let violations = process.check_invariants();
@@ -462,25 +339,30 @@ fn test_pending_votes_invariants() {
         hash: Some(BlockHash(0xABCDEF)),
     };
 
-    // Add this block to the process's state
-    let block = Signed {
-        data: Block {
+    // Generate a QC for the genesis block
+    let gen_vote_data = VoteData {
+        z: 1,
+        for_which: GEN_BLOCK_KEY.clone(),
+    };
+    
+    // Create a dummy threshold signature
+    let gen_qc = ThreshSigned {
+        data: gen_vote_data,
+        signature: hints::Signature::default(),
+    };
+
+    // Add this block to the process's state using proper constructors
+    let block = Signed::from_data(
+        Block {
             key: block_key.clone(),
             prev: vec![],
-            one: ThreshSigned {
-                data: VoteData {
-                    z: 1,
-                    for_which: GEN_BLOCK_KEY.clone(),
-                },
-                signature: ThreshSignature {},
-            },
+            one: gen_qc,
             data: BlockData::Tr {
                 transactions: vec![],
             },
         },
-        author: Identity(1),
-        signature: Signature {},
-    };
+        &process.kb
+    );
 
     // Add the block to the process
     process.record_block(&Arc::new(block));

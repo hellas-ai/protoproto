@@ -77,6 +77,7 @@ pub enum BlockValidationError {
     JustificationQcLessThanOneQc,
     InvalidPrevQcSignature,
     InvalidOneQcSignature,
+    InvalidGenesisOneQc,
 }
 
 impl fmt::Display for BlockValidationError {
@@ -181,6 +182,7 @@ impl fmt::Display for BlockValidationError {
             }
             Self::InvalidPrevQcSignature => write!(f, "Prev QC has invalid signature"),
             Self::InvalidOneQcSignature => write!(f, "One-QC has invalid signature"),
+            Self::InvalidGenesisOneQc => write!(f, "One-QC referring to genesis block is invalid"),
         }
     }
 }
@@ -190,7 +192,7 @@ impl MorpheusProcess {
     ///
     /// Returns Ok(()) if the block is valid, or the specific error that caused validation to fail
     pub fn block_valid(&self, block: &Signed<Block>) -> Result<(), BlockValidationError> {
-        if !block.valid_signature() {
+        if !block.valid_signature(&self.kb) {
             return Err(BlockValidationError::InvalidSignature);
         }
         let block = &block.data;
@@ -235,7 +237,7 @@ impl MorpheusProcess {
                     },
                 );
             }
-            if prev != &*self.genesis_qc && !prev.valid_signature() {
+            if prev != &*self.genesis_qc && !prev.valid_signature(&self.kb) {
                 return Err(BlockValidationError::InvalidPrevQcSignature);
             }
         }
@@ -253,8 +255,14 @@ impl MorpheusProcess {
             });
         }
 
-        if !block.one.valid_signature() {
-            return Err(BlockValidationError::InvalidOneQcSignature);
+        if block.one.data.for_which.type_ != BlockType::Genesis {
+            if !block.one.valid_signature(&self.kb) {
+                return Err(BlockValidationError::InvalidOneQcSignature);
+            }
+        } else {
+            if block.one.data != self.genesis_qc.data {
+                return Err(BlockValidationError::InvalidOneQcSignature);
+            }
         }
 
         match block.prev.iter().max_by_key(|qc| qc.data.for_which.height) {
@@ -349,7 +357,7 @@ impl MorpheusProcess {
                         });
                     }
 
-                    if !just.iter().all(|j| j.valid_signature()) {
+                    if !just.iter().all(|j| j.valid_signature(&self.kb)) {
                         return Err(BlockValidationError::InvalidJustificationSignature);
                     }
 

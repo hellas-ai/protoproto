@@ -1,4 +1,8 @@
+use crate::crypto::*;
 use crate::format;
+
+use ark_serialize::Valid;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -10,18 +14,95 @@ pub enum BlockType {
     Tr,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub struct ThreshSignature {}
+impl CanonicalSerialize for BlockType {
+    fn serialize_with_mode<W: std::io::Write>(
+        &self,
+        writer: W,
+        compress: ark_serialize::Compress,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        u8::serialize_with_mode(&(*self as u8), writer, compress)
+    }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub struct Signature {}
+    fn serialized_size(&self, _: ark_serialize::Compress) -> usize {
+        1
+    }
+}
+
+impl ark_serialize::Valid for BlockType {
+    fn check(&self) -> Result<(), ark_serialize::SerializationError> {
+        Ok(())
+    }
+}
+impl CanonicalDeserialize for BlockType {
+    fn deserialize_with_mode<R: std::io::Read>(
+        reader: R,
+        compress: ark_serialize::Compress,
+        validate: ark_serialize::Validate,
+    ) -> Result<Self, ark_serialize::SerializationError> {
+        let b = u8::deserialize_with_mode(reader, compress, validate)?;
+        match b {
+            0 => Ok(BlockType::Genesis),
+            1 => Ok(BlockType::Lead),
+            2 => Ok(BlockType::Tr),
+            _ => Err(ark_serialize::SerializationError::InvalidData),
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Transaction {
     Opaque(Vec<u8>),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+impl CanonicalSerialize for Transaction {
+    fn serialize_with_mode<W: std::io::Write>(
+        &self,
+        writer: W,
+        compress: ark_serialize::Compress,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        match self {
+            Transaction::Opaque(data) => data.serialize_with_mode(writer, compress),
+        }
+    }
+
+    fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
+        match self {
+            Transaction::Opaque(data) => data.serialized_size(compress),
+        }
+    }
+}
+
+impl CanonicalDeserialize for Transaction {
+    fn deserialize_with_mode<R: std::io::Read>(
+        reader: R,
+        compress: ark_serialize::Compress,
+        validate: ark_serialize::Validate,
+    ) -> Result<Self, ark_serialize::SerializationError> {
+        let data = Vec::deserialize_with_mode(reader, compress, validate)?;
+        Ok(Transaction::Opaque(data))
+    }
+}
+
+impl Valid for Transaction {
+    fn check(&self) -> Result<(), ark_serialize::SerializationError> {
+        Ok(())
+    }
+}
+
+
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct ViewNum(pub i64);
 impl ViewNum {
     pub fn incr(&self) -> Self {
@@ -29,7 +110,19 @@ impl ViewNum {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct SlotNum(pub u64);
 impl SlotNum {
     pub fn is_pred(&self, other: SlotNum) -> bool {
@@ -37,38 +130,31 @@ impl SlotNum {
     }
 }
 
-#[derive(PartialEq, Clone, PartialOrd, Eq, Ord, Debug, Serialize, Deserialize)]
-pub struct Identity(pub u64);
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct BlockHash(pub u64);
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub struct Signed<T> {
-    pub data: T,
-    pub author: Identity,
-    pub signature: Signature,
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
-pub struct ThreshSigned<T> {
-    pub data: T,
-    pub signature: ThreshSignature,
-}
-
-impl<T> ThreshSigned<T> {
-    pub fn valid_signature(&self) -> bool {
-        true
-    }
-}
-
-impl<T> Signed<T> {
-    pub fn valid_signature(&self) -> bool {
-        true
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct BlockKey {
     pub type_: BlockType,
     pub view: ViewNum,
@@ -93,7 +179,17 @@ pub const GEN_BLOCK_KEY: BlockKey = BlockKey {
     hash: None,
 };
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct VoteData {
     pub z: u8,
     pub for_which: BlockKey,
@@ -115,11 +211,22 @@ impl VoteData {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    CanonicalDeserialize,
+    CanonicalSerialize,
+)]
 /// Represents a view change message sent to the new leader
 ///
 /// This message is sent when a process enters a new view:
 /// "Send (v, q') signed by p_i to lead(v), where q' is a maximal amongst 1-QCs seen by p_i"
+#[derive(Debug)]
 pub struct StartView {
     /// The new view number
     pub view: ViewNum,
@@ -140,7 +247,67 @@ pub enum BlockData {
     },
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+impl CanonicalSerialize for BlockData {
+    fn serialize_with_mode<W: std::io::Write>(
+        &self,
+        mut writer: W,
+        compress: ark_serialize::Compress,
+    ) -> Result<(), ark_serialize::SerializationError> {
+        match self {
+            BlockData::Genesis => u8::serialize_with_mode(&0, writer, compress),
+            BlockData::Tr { transactions } => {
+                u8::serialize_with_mode(&1, &mut writer, compress)?;
+                transactions.serialize_with_mode(writer, compress)
+            }
+            BlockData::Lead { justification } => {
+                u8::serialize_with_mode(&2, &mut writer, compress)?;
+                justification.serialize_with_mode(writer, compress)
+            }
+        }
+    }
+
+    fn serialized_size(&self, compress: ark_serialize::Compress) -> usize {
+        match self {
+            BlockData::Genesis => 1,
+            BlockData::Tr { transactions } => 1 + transactions.serialized_size(compress),
+            BlockData::Lead { justification } => 1 + justification.serialized_size(compress),
+        }
+    }
+}
+
+impl Valid for BlockData {
+    fn check(&self) -> Result<(), ark_serialize::SerializationError> {
+        Ok(())
+    }
+}
+
+impl CanonicalDeserialize for BlockData {
+    fn deserialize_with_mode<R: std::io::Read>(
+        mut reader: R,
+        compress: ark_serialize::Compress,
+        validate: ark_serialize::Validate,
+    ) -> Result<Self, ark_serialize::SerializationError> {
+        let b = u8::deserialize_with_mode(&mut reader, compress, validate)?;
+        match b {
+            0 => Ok(BlockData::Genesis),
+            1 => Ok(BlockData::Tr { transactions: Vec::deserialize_with_mode(reader, compress, validate)? }),
+            2 => Ok(BlockData::Lead { justification: Vec::deserialize_with_mode(reader, compress, validate)? }),
+            _ => Err(ark_serialize::SerializationError::InvalidData),
+        }
+    }
+}
+
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+    Serialize,
+    Deserialize,
+)]
 pub struct Block {
     pub key: BlockKey,
     pub prev: Vec<ThreshSigned<VoteData>>,
@@ -157,9 +324,9 @@ impl std::fmt::Debug for Block {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Message {
     Block(Arc<Signed<Block>>),
-    NewVote(Arc<Signed<VoteData>>),
+    NewVote(Arc<ThreshPartial<VoteData>>),
     QC(Arc<ThreshSigned<VoteData>>),
-    EndView(Arc<Signed<ViewNum>>),
+    EndView(Arc<ThreshPartial<ViewNum>>),
     EndViewCert(Arc<ThreshSigned<ViewNum>>),
     StartView(Arc<Signed<StartView>>),
 }

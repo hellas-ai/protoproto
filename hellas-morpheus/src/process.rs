@@ -6,6 +6,7 @@ use std::{
 
 use crate::state_tracking::{PendingVotes, StateIndex};
 use crate::{format::format_message, *};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use serde::{Deserialize, Serialize};
 
 const COMPLAIN_TIMEOUT: u128 = 6;
@@ -18,6 +19,8 @@ const END_VIEW_TIMEOUT: u128 = 12;
 /// producing blocks according to the protocol specification.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MorpheusProcess {
+    pub kb: KeyBook,
+
     /// Identity of this process (equivalent to p_i in the pseudocode)
     pub id: Identity,
 
@@ -107,11 +110,19 @@ pub struct MorpheusProcess {
 /// This is an implementation helper that tracks votes from different processes
 /// and determines when a quorum (n-f votes) has been reached.
 /// Used for implementing the collection of votes in the protocol.
-pub struct QuorumTrack<T: Ord + Serialize + for<'d> Deserialize<'d> + 'static> {
+pub struct QuorumTrack<
+    T: Ord
+        + CanonicalSerialize
+        + CanonicalDeserialize
+        + Valid
+        + Serialize
+        + for<'d> Deserialize<'d>
+        + 'static,
+> {
     /// Maps vote data to a map of (voter identity -> signed vote)
     /// Ensures we only count one vote per process and track when we reach a quorum
     #[serde(with = "serde_json_any_key::any_key_map")]
-    pub votes: BTreeMap<T, BTreeMap<Identity, Arc<Signed<T>>>>,
+    pub votes: BTreeMap<T, BTreeMap<Identity, Arc<ThreshPartial<T>>>>,
 }
 
 /// Error when attempting to record a duplicate vote from the same process
@@ -119,13 +130,23 @@ pub struct QuorumTrack<T: Ord + Serialize + for<'d> Deserialize<'d> + 'static> {
 
 pub struct Duplicate;
 
-impl<T: Ord + Clone + Serialize + for<'d> Deserialize<'d> + 'static> QuorumTrack<T> {
+impl<
+    T: Ord
+        + Clone
+        + CanonicalSerialize
+        + CanonicalDeserialize
+        + Valid
+        + Serialize
+        + for<'d> Deserialize<'d>
+        + 'static,
+> QuorumTrack<T>
+{
     /// Records a new vote and returns the number of votes collected for this data
     ///
     /// This helps implement the quorum formation logic from the pseudocode:
     /// "A z-quorum for b is a set of n-f z-votes for b, each signed by a different process in Π"
     /// Returns Err(Duplicate) if this process has already voted for this data.
-    pub fn record_vote(&mut self, vote: Arc<Signed<T>>) -> Result<usize, Duplicate> {
+    pub fn record_vote(&mut self, vote: Arc<ThreshPartial<T>>) -> Result<usize, Duplicate> {
         let votes_now = self
             .votes
             .entry(vote.data.clone())
@@ -143,7 +164,7 @@ impl<T: Ord + Clone + Serialize + for<'d> Deserialize<'d> + 'static> QuorumTrack
 }
 
 impl MorpheusProcess {
-    pub fn new(id: Identity, n: usize, f: usize) -> Self {
+    pub fn new(keybook: KeyBook, id: Identity, n: usize, f: usize) -> Self {
         // Track process creation with tracing
         crate::tracing_setup::register_process(&id, n, f);
 
@@ -157,12 +178,12 @@ impl MorpheusProcess {
                         z: 1,
                         for_which: GEN_BLOCK_KEY,
                     },
-                    signature: ThreshSignature {},
+                    signature: hints::Signature::default(),
                 },
                 data: BlockData::Genesis,
             },
             author: Identity(u64::MAX),
-            signature: Signature {},
+            signature: hints::PartialSignature::default(),
         });
 
         let genesis_qc = Arc::new(ThreshSigned {
@@ -170,11 +191,12 @@ impl MorpheusProcess {
                 z: 1,
                 for_which: GEN_BLOCK_KEY,
             },
-            signature: ThreshSignature {},
+            signature: hints::Signature::default(),
         });
 
         // Initialize with a recommended default timeout
         MorpheusProcess {
+            kb: keybook,
             id,
             view_i: ViewNum(0),
             slot_i_lead: SlotNum(0),
@@ -295,13 +317,23 @@ impl MorpheusProcess {
                 self.record_block(&block);
             }
             Message::NewVote(vote_data) => {
-                if !vote_data.valid_signature() {
+                if !vote_data.valid_signature(&self.kb) {
+                    tracing::error!(
+                        target: "invalid_vote",
+                        process_id = ?self.id,
+                        vote_data = ?vote_data,
+                    );
                     return false;
                 }
                 self.record_vote(&vote_data, to_send);
             }
             Message::QC(qc) => {
-                if !qc.valid_signature() {
+                if !qc.valid_signature(&self.kb) {
+                    tracing::error!(
+                        target: "invalid_qc",
+                        process_id = ?self.id,
+                        qc = ?qc,
+                    );
                     return false;
                 }
                 self.record_qc(&qc);
@@ -314,18 +346,41 @@ impl MorpheusProcess {
                 }
             }
             Message::EndView(end_view) => {
-                if !end_view.valid_signature() {
+                if !end_view.valid_signature(&self.kb) {
+                    tracing::error!(
+                        target: "invalid_end_view",
+                        process_id = ?self.id,
+                        end_view = ?end_view,
+                    );
                     return false;
                 }
                 match self.end_views.record_vote(end_view.clone()) {
                     Ok(num_votes) => {
                         if end_view.data >= self.view_i && num_votes >= self.f + 1 {
+                            let votes_now = self
+                                .end_views
+                                .votes
+                                .get(&end_view.data)
+                                .unwrap()
+                                .values()
+                                .map(|v| (v.author.0 as usize - 1, v.signature.clone()))
+                                .collect::<Vec<_>>();
+                            let agg = self.kb.hints_setup.aggregator();
+                            let mut data = Vec::new();
+                            end_view.data.serialize_compressed(&mut data).unwrap();
+                            let signed = hints::sign_aggregate(
+                                &agg,
+                                hints::F::from((self.f + 1) as u64),
+                                &votes_now,
+                                &data,
+                            )
+                            .unwrap();
                             self.send_msg(
                                 to_send,
                                 (
                                     Message::EndViewCert(Arc::new(ThreshSigned {
                                         data: end_view.data,
-                                        signature: ThreshSignature {},
+                                        signature: signed,
                                     })),
                                     None,
                                 ),
@@ -336,7 +391,12 @@ impl MorpheusProcess {
                 }
             }
             Message::EndViewCert(end_view_cert) => {
-                if !end_view_cert.valid_signature() {
+                if !end_view_cert.valid_signature(&self.kb) {
+                    tracing::error!(
+                        target: "invalid_end_view_cert",
+                        process_id = ?self.id,
+                        end_view_cert = ?end_view_cert,
+                    );
                     return false;
                 }
                 let view = end_view_cert.data.incr();
@@ -345,7 +405,12 @@ impl MorpheusProcess {
                 }
             }
             Message::StartView(start_view) => {
-                if !start_view.valid_signature() {
+                if !start_view.valid_signature(&self.kb) {
+                    tracing::error!(
+                        target: "invalid_start_view",
+                        process_id = ?self.id,
+                        start_view = ?start_view,
+                    );
                     return false;
                 }
                 if start_view.data.qc.data.z != 1 {
@@ -390,7 +455,7 @@ impl MorpheusProcess {
             Some(&format_message(&cause, false)),
         );
 
-        assert!(self.view_i < new_view);
+        assert!(self.view_i <= new_view);
 
         self.view_i = new_view;
         self.view_entry_time = self.current_time;
@@ -417,14 +482,13 @@ impl MorpheusProcess {
         self.send_msg(
             to_send,
             (
-                Message::StartView(Arc::new(Signed {
-                    data: StartView {
+                Message::StartView(Arc::new(Signed::from_data(
+                    StartView {
                         view: new_view,
                         qc: ThreshSigned::clone(&self.index.max_1qc),
                     },
-                    author: self.id.clone(),
-                    signature: Signature {},
-                })),
+                    &self.kb,
+                ))),
                 Some(self.lead(new_view)),
             ),
         );
@@ -478,11 +542,7 @@ impl MorpheusProcess {
             self.send_msg(
                 to_send,
                 (
-                    Message::EndView(Arc::new(Signed {
-                        data: self.view_i,
-                        author: self.id.clone(),
-                        signature: Signature {},
-                    })),
+                    Message::EndView(Arc::new(ThreshPartial::from_data(self.view_i, &self.kb))),
                     None,
                 ),
             );

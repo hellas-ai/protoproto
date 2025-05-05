@@ -7,10 +7,12 @@
 //! We process each message to completion, check timeouts, check block production eligibility, and finally advance the state of the simulation.
 
 use std::{
-    cell::RefCell,
+    collections::{BTreeMap, VecDeque},
     sync::Arc,
-    collections::{BTreeMap, VecDeque}, sync::RwLock,
+    sync::RwLock,
 };
+
+use ark_std::test_rng;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,13 +42,61 @@ pub struct MockHarness {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TxGenPolicy {
-    EveryNSteps { n: usize },
-    OncePerView { prev_view: Arc<RwLock<Option<ViewNum>>> },
+    EveryNSteps {
+        n: usize,
+    },
+    OncePerView {
+        prev_view: Arc<RwLock<Option<ViewNum>>>,
+    },
     Always,
     Never,
 }
 
 impl MockHarness {
+    pub fn create_test_setup(num_parties: usize) -> MockHarness {
+        let domain_max = (1+num_parties).next_power_of_two();
+        let gd = hints::GlobalData::new(domain_max, &mut test_rng()).unwrap();
+        let privs = vec![hints::SecretKey::random(&mut test_rng()); domain_max-1];
+        let pubkeys: Vec<hints::PublicKey> = privs.iter().map(|sk| sk.public(&gd)).collect();
+        let weights = vec![hints::F::from(1); domain_max-1];
+
+        let hints = (0..domain_max-1)
+            .map(|i| hints::generate_hint(&gd, &privs[i], domain_max, i).unwrap())
+            .collect::<Vec<_>>();
+
+        let setup = hints::setup_universe(&gd, pubkeys.clone(), &hints, weights).unwrap();
+
+        let keys: BTreeMap<Identity, hints::PublicKey> = (0..num_parties)
+            .map(|i| (Identity(i as u64 + 1), pubkeys[i].clone()))
+            .collect();
+
+        let identities: BTreeMap<hints::PublicKey, Identity> = (0..num_parties)
+            .map(|i| (pubkeys[i].clone(), Identity(i as u64 + 1)))
+            .collect();
+
+        // Create processes with different identities
+        let processes = (0..num_parties)
+            .map(|i| {
+                MorpheusProcess::new(
+                    KeyBook {
+                        keys: keys.clone(),
+                        identities: identities.clone(),
+                        me_identity: Identity(i as u64 + 1),
+                        me_pub_key: pubkeys[i].clone(),
+                        me_sec_key: privs[i].clone(),
+                        hints_setup: setup.clone(),
+                    },
+                    Identity(i as u64 + 1),
+                    num_parties,
+                    (num_parties - 1).div_ceil(3) / 3,
+                )
+            })
+            .collect();
+
+        // Create a harness with these processes
+        MockHarness::new(processes, 100)
+    }
+
     /// Create a new mock harness with the given nodes
     pub fn new(nodes: Vec<MorpheusProcess>, time_step: u128) -> Self {
         let mut processes = BTreeMap::new();

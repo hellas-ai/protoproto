@@ -1,37 +1,28 @@
+use ark_serialize::CanonicalSerialize;
+use ark_std::test_rng;
 use hellas_morpheus::test_harness::MockHarness;
 use hellas_morpheus::{
-    BlockKey, BlockType, Identity, Message, MorpheusProcess, Signature, Signed, SlotNum,
-    ThreshSignature, ThreshSigned, ViewNum, VoteData,
+    BlockKey, BlockType, Identity, Message, MorpheusProcess, Signed, SlotNum, ThreshPartial,
+    ThreshSigned, ViewNum, VoteData,
 };
+use hints::{F, GlobalData};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-// Helper function to create a new test setup with 3 processes
-fn create_test_setup() -> MockHarness {
-    // Create processes with different identities
-    let process1 = MorpheusProcess::new(Identity(1), 3, 1);
-    let process2 = MorpheusProcess::new(Identity(2), 3, 1);
-    let process3 = MorpheusProcess::new(Identity(3), 3, 1);
-
-    // Create a harness with these processes
-    MockHarness::new(vec![process1, process2, process3], 100)
-}
-
 #[test_log::test]
-fn test_multiple_message_processing() {
-    let mut harness = create_test_setup();
+fn test_multiple_rounds_end_view() {
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Create a few simple messages
-    let message1 = Message::EndView(Arc::new(Signed {
-        data: ViewNum(0),
-        author: Identity(1),
-        signature: Signature {},
-    }));
+    let message1 = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
-    let message2 = Message::EndView(Arc::new(Signed {
-        data: ViewNum(1),
-        author: Identity(2),
-        signature: Signature {},
-    }));
+    let message2 = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(1),
+        &harness.processes.get(&Identity(2)).unwrap().kb,
+    )));
 
     // Enqueue the messages for specific destinations
     harness.enqueue_message(message1, Identity(1), Some(Identity(2)));
@@ -40,7 +31,13 @@ fn test_multiple_message_processing() {
     // Initial queue length
     assert_eq!(harness.pending_messages.len(), 2);
 
-    // Process the round
+    // delivers the first EndViews, which will transition p1 and p2
+    harness.process_round();
+    assert_eq!(harness.pending_messages.len(), 6);
+    // p1 and p2 broadcast the EndViews to p3
+    harness.process_round();
+    assert_eq!(harness.pending_messages.len(), 2);
+    // p3 broadcasts its EndViews, emptying the queue
     harness.process_round();
 
     // Queue should be empty after processing
@@ -52,7 +49,7 @@ fn test_multiple_message_processing() {
             .unwrap()
             .received_messages
             .len(),
-        2
+        3
     );
     assert_eq!(
         harness
@@ -61,7 +58,7 @@ fn test_multiple_message_processing() {
             .unwrap()
             .received_messages
             .len(),
-        3
+        5
     );
     assert_eq!(
         harness
@@ -70,13 +67,13 @@ fn test_multiple_message_processing() {
             .unwrap()
             .received_messages
             .len(),
-        3
+        7
     );
 }
 
 #[test_log::test]
 fn test_time_advancement_affects_processes() {
-    let mut harness = create_test_setup();
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Initial time should be 0 for harness and all processes
     assert_eq!(harness.time, 0);
@@ -98,7 +95,7 @@ fn test_time_advancement_affects_processes() {
 
 #[test_log::test]
 fn test_complex_simulation() {
-    let mut harness = create_test_setup();
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Initial state
     assert_eq!(harness.time, 0);
@@ -117,10 +114,33 @@ fn test_complex_simulation() {
         },
     };
 
+    let p1_vote = ThreshPartial::from_data(
+        vote_data.clone(),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    );
+    let p2_vote = ThreshPartial::from_data(
+        vote_data.clone(),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    );
+    let agg = harness
+        .processes
+        .get(&Identity(1))
+        .unwrap()
+        .kb
+        .hints_setup
+        .aggregator();
+    let mut msg = Vec::new();
+    vote_data.serialize_compressed(&mut msg).unwrap();
     // Create a QC message
     let qc_message = Message::QC(Arc::new(ThreshSigned {
         data: vote_data,
-        signature: ThreshSignature {},
+        signature: hints::sign_aggregate(
+            &agg,
+            hints::F::from(2),
+            &[(1, p1_vote.signature), (2, p2_vote.signature)],
+            &msg,
+        )
+        .unwrap(),
     }));
 
     // Broadcast the message
@@ -135,7 +155,7 @@ fn test_complex_simulation() {
 
 #[test_log::test]
 fn test_message_enqueue_and_processing() {
-    let mut harness = create_test_setup();
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Create a simple vote data
     let vote_data = VoteData {
@@ -151,11 +171,10 @@ fn test_message_enqueue_and_processing() {
     };
 
     // Create a signed vote
-    let signed_vote = Signed {
-        data: vote_data.clone(),
-        author: Identity(1),
-        signature: Signature {},
-    };
+    let signed_vote = ThreshPartial::from_data(
+        vote_data.clone(),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    );
 
     // Create a NewVote message
     let vote_message = Message::NewVote(Arc::new(signed_vote));
@@ -175,7 +194,7 @@ fn test_message_enqueue_and_processing() {
 
 #[test_log::test]
 fn test_step_sequence() {
-    let mut harness = create_test_setup();
+    let mut harness = MockHarness::create_test_setup(3);
 
     // Initial state
     assert_eq!(harness.time, 0);
@@ -190,11 +209,10 @@ fn test_step_sequence() {
     assert_eq!(harness.time, 100);
 
     // Add a message after the first step
-    let message = Message::EndView(Arc::new(Signed {
-        data: ViewNum(0),
-        author: Identity(1),
-        signature: Signature {},
-    }));
+    let message = Message::EndView(Arc::new(ThreshPartial::from_data(
+        ViewNum(0),
+        &harness.processes.get(&Identity(1)).unwrap().kb,
+    )));
 
     harness.enqueue_message(message, Identity(1), Some(Identity(2)));
 

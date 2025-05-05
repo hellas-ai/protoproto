@@ -90,14 +90,11 @@ impl MorpheusProcess {
             },
         };
 
-        let signed_block = Arc::new(Signed {
-            data: block.clone(),
-            author: self.id.clone(),
-            signature: Signature {},
-        });
+        crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
+
+        let signed_block = Arc::new(Signed::from_data(block, &self.kb));
 
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
-        crate::tracing_setup::block_created(&self.id, "transaction", &block.key);
 
         self.send_msg(to_send, (Message::Block(signed_block.clone()), None));
     }
@@ -233,11 +230,7 @@ impl MorpheusProcess {
 
         crate::tracing_setup::block_created(&self.id, "leader", &block.key);
 
-        let signed_block = Arc::new(Signed {
-            data: block,
-            author: self.id.clone(),
-            signature: Signature {},
-        });
+        let signed_block = Arc::new(Signed::from_data(block, &self.kb));
 
         self.send_msg(to_send, (Message::Block(signed_block), None));
 

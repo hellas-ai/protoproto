@@ -2,6 +2,11 @@
 
 use std::fmt::Write;
 
+use ark_serialize::CanonicalDeserialize;
+use ark_serialize::CanonicalSerialize;
+use ark_serialize::Valid;
+
+use crate::crypto::*;
 use crate::types::*;
 
 /// Format a BlockType in a concise way
@@ -78,7 +83,7 @@ pub fn format_vote_data(vote_data: &VoteData, verbose: bool) -> String {
 }
 
 /// Format a signed value in a concise way
-pub fn format_signed<T>(
+pub fn format_signed<T: CanonicalSerialize + CanonicalDeserialize + Valid>(
     signed: &Signed<T>,
     value_formatter: impl Fn(&T) -> String,
     verbose: bool,
@@ -98,8 +103,29 @@ pub fn format_signed<T>(
     }
 }
 
+/// Format a signed value in a concise way
+pub fn format_thresh_partial<T: CanonicalSerialize + CanonicalDeserialize + Valid>(
+    signed: &ThreshPartial<T>,
+    value_formatter: impl Fn(&T) -> String,
+    verbose: bool,
+) -> String {
+    if verbose {
+        format!(
+            "ThreshPartial{{ data: {}, author: {} }}",
+            value_formatter(&signed.data),
+            format_identity(&signed.author)
+        )
+    } else {
+        format!(
+            "{}[{}]",
+            value_formatter(&signed.data),
+            format_identity(&signed.author)
+        )
+    }
+}
+
 /// Format a threshold signed value in a concise way
-pub fn format_thresh_signed<T>(
+pub fn format_thresh_signed<T: CanonicalSerialize + CanonicalDeserialize + Valid>(
     signed: &ThreshSigned<T>,
     value_formatter: impl Fn(&T) -> String,
     verbose: bool,
@@ -212,7 +238,7 @@ pub fn format_message(message: &Message, verbose: bool) -> String {
             if verbose {
                 format!(
                     "NewVote({})",
-                    format_signed(vote, |vd| format_vote_data(vd, true), true)
+                    format_thresh_partial(vote, |vd| format_vote_data(vd, true), true)
                 )
             } else {
                 format!(
@@ -236,7 +262,7 @@ pub fn format_message(message: &Message, verbose: bool) -> String {
             if verbose {
                 format!(
                     "EndView({})",
-                    format_signed(view, |v| format_view_num(v), true)
+                    format_thresh_partial(view, |v| format_view_num(v), true)
                 )
             } else {
                 format!(

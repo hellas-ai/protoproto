@@ -4,6 +4,7 @@ use std::{
     sync::Arc,
 };
 
+use ark_serialize::CanonicalSerialize;
 use serde::{Deserialize, Serialize};
 
 use crate::*;
@@ -162,14 +163,13 @@ impl MorpheusProcess {
             self.voted_i
                 .insert((z, block.type_, block.slot, author.clone()));
 
-            let voted = Arc::new(Signed {
-                data: VoteData {
+            let voted = Arc::new(ThreshPartial::from_data(
+                VoteData {
                     z,
                     for_which: block.clone(),
                 },
-                author: self.id.clone(),
-                signature: Signature {},
-            });
+                &self.kb,
+            ));
             self.send_msg(to_send, (Message::NewVote(voted.clone()), target));
             true
         } else {
@@ -180,7 +180,7 @@ impl MorpheusProcess {
     /// Returns false if the vote is a duplicate (sender already voted there)
     pub fn record_vote(
         &mut self,
-        vote_data: &Arc<Signed<VoteData>>,
+        vote_data: &Arc<ThreshPartial<VoteData>>,
         to_send: &mut Vec<(Message, Option<Identity>)>,
     ) -> bool {
         tracing::debug!(target: "record_vote", vote_data = ?vote_data.data);
@@ -188,9 +188,27 @@ impl MorpheusProcess {
             Ok(num_votes) => {
                 if num_votes == self.n - self.f {
                     // TODO: real crypto
+                    let votes_now = self
+                        .vote_tracker
+                        .votes
+                        .get(&vote_data.data)
+                        .unwrap()
+                        .values()
+                        .map(|v| (v.author.0 as usize - 1, v.signature.clone()))
+                        .collect::<Vec<_>>();
+                    let agg = self.kb.hints_setup.aggregator();
+                    let mut data = Vec::new();
+                    vote_data.data.serialize_compressed(&mut data).unwrap();
+                    let signed = hints::sign_aggregate(
+                        &agg,
+                        hints::F::from((self.f + 1) as u64),
+                        &votes_now,
+                        &data,
+                    )
+                    .unwrap();
                     let quorum_formed = Arc::new(ThreshSigned {
                         data: vote_data.data.clone(),
-                        signature: ThreshSignature {},
+                        signature: signed,
                     });
                     if vote_data.data.z == 0
                         && vote_data.data.for_which.author.as_ref() == Some(&self.id)

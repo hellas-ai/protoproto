@@ -39,6 +39,7 @@ mod invariants;
 mod process;
 mod state_tracking;
 mod types;
+mod crypto;
 
 pub mod format;
 pub mod test_harness;
@@ -49,3 +50,4 @@ pub use invariants::InvariantViolation;
 pub use state_tracking::{PendingVotes, StateIndex};
 pub use process::*;
 pub use types::*;
+pub use crypto::*;
