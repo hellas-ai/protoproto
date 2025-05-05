@@ -1,24 +1,35 @@
 use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
 
-use ark_serialize::CanonicalSerialize;
 use serde::{Deserialize, Serialize};
 
 use crate::*;
 
+/// Tracks votes pending for reevaluation in each view
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct PendingVotes {
+    /// Transaction block 1-votes pending evaluation
     pub tr_1: BTreeMap<BlockKey, bool>,
+    
+    /// Transaction block 2-votes pending evaluation
     pub tr_2: BTreeMap<BlockKey, bool>,
+    
+    /// Leader block 1-votes pending evaluation
     pub lead_1: BTreeMap<BlockKey, bool>,
+    
+    /// Leader block 2-votes pending evaluation
     pub lead_2: BTreeMap<BlockKey, bool>,
+    
+    /// Flag indicating votes need reevaluation
     pub dirty: bool,
 }
 
-/// Tracks all structural state
+/// Manages the block DAG structure and QC tracking
+/// 
+/// StateIndex is responsible for tracking all blocks, QCs, and their relationships
+/// in the DAG. It maintains multiple indices for efficient lookup and querying.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StateIndex {
     /// Stores QCs indexed by their VoteData
@@ -97,6 +108,7 @@ pub struct StateIndex {
 }
 
 impl StateIndex {
+    /// Creates a new StateIndex with the genesis block and QC
     pub fn new(genesis_qc: Arc<ThreshSigned<VoteData>>, genesis_block: Arc<Signed<Block>>) -> Self {
         Self {
             qcs: {
@@ -145,100 +157,8 @@ impl StateIndex {
     }
 }
 
+/// State tracking functionality for the MorpheusProcess
 impl MorpheusProcess {
-    pub fn try_vote(
-        &mut self,
-        z: u8,
-        block: &BlockKey,
-        target: Option<Identity>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) -> bool {
-        tracing::debug!(target: "try_vote", z = z, block = ?block, target = ?target);
-        let author = block.author.clone().expect("not voting for genesis block");
-
-        if !self
-            .voted_i
-            .contains(&(z, block.type_, block.slot, author.clone()))
-        {
-            self.voted_i
-                .insert((z, block.type_, block.slot, author.clone()));
-
-            let voted = Arc::new(ThreshPartial::from_data(
-                VoteData {
-                    z,
-                    for_which: block.clone(),
-                },
-                &self.kb,
-            ));
-            self.send_msg(to_send, (Message::NewVote(voted.clone()), target));
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Returns false if the vote is a duplicate (sender already voted there)
-    pub fn record_vote(
-        &mut self,
-        vote_data: &Arc<ThreshPartial<VoteData>>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) -> bool {
-        tracing::debug!(target: "record_vote", vote_data = ?vote_data.data);
-        match self.vote_tracker.record_vote(vote_data.clone()) {
-            Ok(num_votes) => {
-                if num_votes == self.n - self.f {
-                    // make the signature
-                    let votes_now = self
-                        .vote_tracker
-                        .votes
-                        .get(&vote_data.data)
-                        .unwrap()
-                        .values()
-                        .map(|v| (v.author.0 as usize - 1, v.signature.clone()))
-                        .collect::<Vec<_>>();
-                    let agg = self.kb.hints_setup.aggregator();
-                    let mut data = Vec::new();
-                    vote_data.data.serialize_compressed(&mut data).unwrap();
-                    let signed = hints::sign_aggregate(
-                        &agg,
-                        hints::F::from((self.f + 1) as u64),
-                        &votes_now,
-                        &data,
-                    )
-                    .unwrap();
-                    let quorum_formed = Arc::new(ThreshSigned {
-                        data: vote_data.data.clone(),
-                        signature: signed,
-                    });
-
-                    // 0-QCs for our own blocks need to be broadcast
-                    if vote_data.data.z == 0
-                        && vote_data.data.for_which.author.as_ref() == Some(&self.id)
-                        && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
-                    {
-                        self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
-                        crate::tracing_setup::qc_formed(
-                            &self.id,
-                            vote_data.data.z,
-                            &vote_data.data,
-                        );
-                        self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
-                    }
-                    self.record_qc(quorum_formed);
-                }
-                true
-            }
-            Err(Duplicate) => {
-                tracing::error!(
-                    target: "duplicate_vote",
-                    vote_data = ?vote_data.data,
-                    author = ?vote_data.author
-                );
-                false
-            }
-        }
-    }
-
     /// Records a new quorum certificate in this process's state
     ///
     /// This implements the automatic updating of Q_i from the pseudocode:
@@ -246,11 +166,12 @@ impl MorpheusProcess {
     /// and if Q_i does not contain a z-QC for b, then p_i automatically
     /// enumerates a z-QC for b into Q_i"
     pub fn record_qc(&mut self, qc: Arc<ThreshSigned<VoteData>>) {
+        // Skip if we already have this QC
         if self.index.qcs.contains_key(&qc.data) {
             return;
         }
 
-        // maintain the (type, author, {slot,view}) -> qc index
+        // Update indexes: qc_by_slot and qc_by_view
         if let Some(author) = &qc.data.for_which.author {
             self.index.qc_by_slot.insert(
                 (
@@ -272,20 +193,19 @@ impl MorpheusProcess {
                 .push(qc.clone());
         }
 
-        // all new qcs are unfinalized until proven otherwise
+        // Track unfinalized QCs
         self.index
             .unfinalized
             .entry(qc.data.for_which.clone())
             .or_default()
             .insert(qc.data.clone());
 
+        // Special handling for 1-QCs
         if qc.data.z == 1 {
             self.index.all_1qc.insert(qc.clone());
 
-            // FIXME: should we compare against tips? all_1qc? successive max_1qc
-            // should be a chain, but maybe switching between them is sometimes
-            // helpful?
-            if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Greater {
+            // Update max_1qc if this QC is greater
+            if self.index.max_1qc.data.compare_qc(&qc.data) != std::cmp::Ordering::Greater {
                 tracing_setup::protocol_transition(
                     &self.id,
                     "updating max 1-QC",
@@ -297,32 +217,27 @@ impl MorpheusProcess {
             }
         }
 
+        // Update max_view if needed
         if qc.data.for_which.view > self.index.max_view.0 {
             self.index.max_view = (qc.data.for_which.view, qc.data.clone());
         }
 
-        // TODO: don't do this _every_ time a qc is formed,
-        //       batch up the changes and do some more efficient
-        //       checking when we next need the tips? (isn't this right away?)
-
-        // incrementally maintain the tips, which is the maximal antichain of all blocks.
-
-        let mut tips_to_yeet = BTreeSet::new();
+        // Update DAG tips - remove tips that are observed by this QC
+        let mut tips_to_remove = BTreeSet::new();
         for tip in &self.index.tips {
-            // if the qc observes some existing tip, then that tip gets yoinked
-            // in favor of the new qc
             if self.observes(qc.data.clone(), tip) {
-                tips_to_yeet.insert(tip.clone());
-                tracing::info!(target: "yeet_tip", new_tip = ?qc.data, old_tip = ?tip);
+                tips_to_remove.insert(tip.clone());
+                tracing::info!(target: "remove_tip", new_tip = ?qc.data, old_tip = ?tip);
             }
         }
-        if !tips_to_yeet.is_empty() {
-            // this qc is a new tip because it observes some existing tips
-            self.index.tips.retain(|tip| !tips_to_yeet.contains(tip));
+        
+        if !tips_to_remove.is_empty() {
+            // This QC is a new tip because it observes some existing tips
+            self.index.tips.retain(|tip| !tips_to_remove.contains(tip));
             self.index.tips.push(qc.data.clone());
             tracing::info!(target: "new_tip", qc = ?qc.data);
         } else {
-            // this qc still might be a new tip if none of the existing tips observe it
+            // This QC might still be a new tip if none of the existing tips observe it
             if !self
                 .index
                 .tips
@@ -335,49 +250,22 @@ impl MorpheusProcess {
             }
         }
 
+        // Add the QC to our state
         self.index.qcs.insert(qc.data.clone(), qc.clone());
 
-        // now find all the waiting 2-qcs that this qc can finalize
+        // Process finalization - find all blocks that this QC finalizes
+        let finalized_blocks = self.process_finalization(&qc);
 
-        let finalized_here = self
-            .index
-            .unfinalized_2qc
-            .iter()
-            .cloned()
-            .filter(|unfinalized_2qc| self.observes(qc.data.clone(), unfinalized_2qc))
-            .collect::<BTreeSet<_>>();
-
-        if qc.data.z == 2 {
-            // IMPORTANT: a QC observes itself, so make sure we add it AFTER
-            // we scan, otherwise this block will incorrectly finalize itself.
-            self.index.unfinalized_2qc.insert(qc.data.clone());
-        }
-
-        self.index
-            .unfinalized_2qc
-            .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
-
-        // finalize the blocks
-        for finalized in finalized_here {
-            tracing::debug!(target: "finalized", qc = ?finalized);
-            self.index
-                .unfinalized_lead_by_view
-                .entry(finalized.for_which.view)
-                .or_default()
-                .remove(&finalized.for_which);
-            self.index.unfinalized.remove(&finalized.for_which);
-            self.index
-                .finalized
-                .insert(finalized.for_which.clone(), true);
-
-            // re-evaluate the pending votes for this view
+        // Update pending votes for affected views
+        for block_key in finalized_blocks {
+            // Mark the view's pending votes as dirty so they'll be reevaluated
             self.pending_votes
-                .entry(finalized.for_which.view)
+                .entry(block_key.view)
                 .or_default()
                 .dirty = true;
         }
 
-        // start watching for 2-votes
+        // Handle pending votes for 2-votes after a 1-QC is formed
         if qc.data.z == 1 {
             let pending = self
                 .pending_votes
@@ -400,41 +288,43 @@ impl MorpheusProcess {
     ///
     /// It will also record any QCs that are used as pointers in the block.
     pub fn record_block(&mut self, block: &Arc<Signed<Block>>) {
+        // Skip duplicate blocks
         if self.index.blocks.contains_key(&block.data.key) {
             tracing::warn!(target: "duplicate_block", key = ?block.data.key);
             return;
         }
 
-        // max_height is needed for is_eligible_for_tr_2_vote
+        // Update max_height tracking
         if block.data.key.height > self.index.max_height.0 {
             tracing::debug!(target: "new_max_height", height = block.data.key.height, key = ?block.data.key);
             self.index.max_height = (block.data.key.height, block.data.key.clone());
         }
 
+        // Update block indexing
         if let Some(author) = &block.data.key.author {
             self.index
                 .block_index
                 .entry((block.data.key.type_, block.data.key.view, author.clone()))
-                .or_insert_with(Vec::new)
+                .or_insert(Vec::new())
                 .push(block.clone());
 
-            // produced_lead_in_view is needed for leader_ready
+            // Track produced leader blocks
             if block.data.key.type_ == BlockType::Lead && author == &self.id {
                 self.produced_lead_in_view.insert(block.data.key.view, true);
             }
         }
 
         let block_key = block.data.key.clone();
-        assert_eq!(self.index.finalized.insert(block_key.clone(), false), None);
-        assert_eq!(
-            self.index.blocks.insert(block_key.clone(), block.clone()),
-            None
-        );
+        
+        // Initialize finalization tracking
+        self.index.finalized.insert(block_key.clone(), false);
+        self.index.blocks.insert(block_key.clone(), block.clone());
 
-        // track the voting status for this block
+        // Update pending votes tracking
         let pending = self.pending_votes.entry(block.data.key.view).or_default();
         match block.data.key.type_ {
             BlockType::Lead => {
+                // Track leader blocks per view
                 self.index
                     .contains_lead_by_view
                     .insert(block.data.key.view, true);
@@ -453,7 +343,7 @@ impl MorpheusProcess {
             BlockType::Genesis => panic!("Why are we recording the genesis block?"),
         }
 
-        // track the points-to relationship for block_is_single_tip
+        // Update DAG structure tracking (points-to relationship)
         for qc in &block.data.prev {
             self.index
                 .block_pointed_by
@@ -462,7 +352,7 @@ impl MorpheusProcess {
                 .insert(block_key.clone());
         }
 
-        // record any QCs that are used as pointers in the block
+        // Record any QCs contained in the block
         for qc in block
             .data
             .prev
@@ -471,223 +361,5 @@ impl MorpheusProcess {
         {
             self.record_qc(Arc::new(qc.clone()));
         }
-    }
-
-    /// Determines if one QC observes another according to the observes relation ⪰
-    ///
-    /// Implements the observes relation from the pseudocode:
-    /// "We define the 'observes' relation ⪰ on Q_i to be the minimal preordering satisfying (transitivity and):
-    /// • If q,q' ∈ Q_i, q.type = q'.type, q.auth = q'.auth and q.slot > q'.slot, then q ⪰ q'.
-    /// • If q,q' ∈ Q_i, q.type = q'.type, q.auth = q'.auth, q.slot = q'.slot, and q.z ≥ q'.z, then q ⪰ q'."
-    /// • If q,q' ∈ Q_i, q.b = b, q'.b = b', b ∈ M_i and b points to b', then q ⪰ q'."
-    ///
-    /// Implemented as a BFS on the points-to graph combined with a direct
-    /// observation check.
-    pub fn observes(&self, root: VoteData, needle: &VoteData) -> bool {
-        // do a BFS from root to see if it observes needle
-        let mut observed = false;
-        let mut to_visit: VecDeque<VoteData> = vec![root].into();
-        while !to_visit.is_empty() {
-            let node = to_visit.pop_front().unwrap();
-            if self.directly_observes(&node, needle) {
-                observed = true;
-                break;
-            }
-            if let Some(block) = self.index.blocks.get(&node.for_which) {
-                for prev in &block.data.prev {
-                    to_visit.push_back(prev.data.clone());
-                }
-            } else {
-                tracing::warn!("Block not found for {:?}", node.for_which);
-            }
-        }
-        observed
-    }
-
-    /// Determines if one QC directly observes another (without transitivity)
-    ///
-    /// Implements the direct observation component of the observes relation ⪰
-    pub fn directly_observes(&self, looks: &VoteData, seen: &VoteData) -> bool {
-        if looks.for_which.type_ == seen.for_which.type_
-            && looks.for_which.author == seen.for_which.author
-            && looks.for_which.slot > seen.for_which.slot
-        {
-            return true;
-        }
-        if looks.for_which.type_ == seen.for_which.type_
-            && looks.for_which.author == seen.for_which.author
-            && looks.for_which.slot == seen.for_which.slot
-            && looks.z >= seen.z
-        {
-            return true;
-        }
-        if let Some(block) = self.index.blocks.get(&looks.for_which) {
-            if block
-                .data
-                .prev
-                .iter()
-                .any(|prev| prev.data.for_which == seen.for_which)
-            {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn set_phase(&mut self, phase: Phase) {
-        self.phase_i.insert(self.view_i, phase);
-    }
-
-    /// Re-evaluate all pending votes based on current state
-    pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        // Only process votes for the current view
-        let current_view = self.view_i;
-
-        let mut all_pending = std::mem::replace(&mut self.pending_votes, BTreeMap::new());
-
-        let pending = all_pending.entry(current_view).or_default();
-        if !pending.dirty {
-            return;
-        }
-
-        // First check global conditions for the current view
-        let contains_lead = self
-            .index
-            .contains_lead_by_view
-            .get(&current_view)
-            .copied()
-            .unwrap_or(false);
-        let unfinalized_lead_empty = self
-            .index
-            .unfinalized_lead_by_view
-            .get(&current_view)
-            .map_or(true, |set| set.is_empty());
-
-        // Only process transaction block votes if we have leader blocks and no unfinalized leader blocks
-        if contains_lead && unfinalized_lead_empty {
-            // Process transaction block votes (1-votes and 2-votes)
-            self.process_block_votes(
-                1,
-                &mut pending.tr_1,
-                |this, block_key| this.is_eligible_for_tr_1_vote(block_key),
-                Some("1-voted for a transaction block"),
-                to_send,
-            );
-
-            self.process_block_votes(
-                2,
-                &mut pending.tr_2,
-                |this, block_key| this.is_eligible_for_tr_2_vote(block_key),
-                Some("2-voted for a transaction block"),
-                to_send,
-            );
-        }
-
-        // Process leader block votes if we're still in high throughput phase
-        if self.phase_i.get(&current_view).unwrap_or(&Phase::High) == &Phase::High {
-            self.process_block_votes(
-                1,
-                &mut pending.lead_1,
-                |_, block_key| block_key.view == current_view,
-                None,
-                to_send,
-            );
-
-            self.process_block_votes(
-                2,
-                &mut pending.lead_2,
-                |_, block_key| block_key.view == current_view,
-                None,
-                to_send,
-            );
-        }
-
-        pending.dirty = false;
-        self.pending_votes = all_pending;
-    }
-
-    /// Generic method to process pending votes for blocks
-    ///
-    /// This handles both transaction and leader blocks for both 1-votes and 2-votes
-    fn process_block_votes<F>(
-        &mut self,
-        vote_level: u8,
-        pending_votes: &mut BTreeMap<BlockKey, bool>,
-        eligibility_check: F,
-        phase_transition_reason: Option<&str>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) where
-        F: Fn(&Self, &BlockKey) -> bool,
-    {
-        let mut processed_keys = Vec::new();
-
-        for block_key in pending_votes.keys().cloned() {
-            if eligibility_check(self, &block_key) {
-                if self.try_vote(vote_level, &block_key, None, to_send) {
-                    if block_key.type_ == BlockType::Tr && phase_transition_reason.is_some() {
-                        // If we voted for a transaction block, transition to low throughput phase
-                        crate::tracing_setup::protocol_transition(
-                            &self.id,
-                            "throughput phase",
-                            &Phase::High,
-                            &Phase::Low,
-                            phase_transition_reason,
-                        );
-                        self.set_phase(Phase::Low);
-                    }
-                    processed_keys.push(block_key);
-                } else {
-                    panic!(
-                        "Already {}-voted {:?}, pending votes desync bug",
-                        vote_level, block_key
-                    );
-                }
-            }
-        }
-
-        pending_votes.retain(|key, _| !processed_keys.contains(&key));
-    }
-
-    fn block_is_single_tip(&self, block_key: &BlockKey) -> bool {
-        if self.index.tips.len() != 1 {
-            return false;
-        }
-        match self.index.tips.get(0) {
-            Some(tip) => self
-                .index
-                .block_pointed_by
-                .get(&tip.for_which)
-                .map_or(false, |parents| {
-                    parents.len() == 1 && parents.first().unwrap() == block_key
-                }),
-            None => false,
-        }
-    }
-
-    pub(crate) fn is_eligible_for_tr_1_vote(&self, block_key: &BlockKey) -> bool {
-        let has_single_tip = self.block_is_single_tip(block_key);
-
-        if !has_single_tip || !self.index.blocks.contains_key(block_key) {
-            return false;
-        }
-
-        let block = self.index.blocks.get(block_key).unwrap();
-        self.index
-            .all_1qc
-            .iter()
-            .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
-    }
-
-    pub(crate) fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
-        let has_single_tip = self.index.tips.len() == 1
-            && self
-                .index
-                .tips
-                .get(0)
-                .map_or(false, |tip| tip.z == 1 && tip.for_which.eq(block_key));
-
-        let no_higher_blocks = self.index.max_height.0 <= block_key.height;
-
-        has_single_tip && no_higher_blocks
     }
 }
