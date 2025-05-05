@@ -18,13 +18,23 @@
 //!
 //! ## Implementation Structure
 //!
-//! - `process.rs`: Defines the core `MorpheusProcess` struct and message handling
-//! - `block_production.rs`: Implements block creation logic
-//! - `state_tracking.rs`: Manages protocol state (blocks, QCs, DAG structure)
-//! - `types.rs`: Defines protocol data types
-//! - `mock_harness.rs`: Testing framework for the protocol
+//! Core Protocol Modules:
+//! - `types.rs`: Core data structures and protocol types
+//! - `process.rs`: Core MorpheusProcess struct definition
+//! - `message_handling.rs`: Protocol message processing logic
+//! - `block_production.rs`: Block creation logic
+//! - `state_tracking.rs`: DAG management and state tracking
+//! - `voting.rs`: Vote collection and quorum formation
+//! - `finalization.rs`: Block finalization logic
+//! - `view_management.rs`: View changes and phase transitions
+//! - `block_validation.rs`: Block validation rules
+//!
+//! Supporting Modules:
+//! - `crypto.rs`: Cryptographic primitives for the protocol
+//! - `invariants.rs`: Invariant checking for protocol safety
+//! - `format.rs`: String formatting for protocol structures
 //! - `tracing_setup.rs`: Structured logging with tracing-rs
-//! - `hades/`: Web-based visualization and debugging interface
+//! - `test_harness.rs`: Testing framework for the protocol
 //!
 //! ## Key Protocol Concepts
 //!
@@ -33,21 +43,36 @@
 //! - **Observes relation**: Defines the DAG structure and block ordering
 //! - **View changes**: Allow progress when a leader is faulty
 
+// Core protocol modules
 mod block_production;
 mod block_validation;
 mod crypto;
+mod finalization;
 mod invariants;
+mod message_handling;
 mod process;
 mod state_tracking;
 mod types;
+mod view_management;
+mod voting;
 
+// Public modules
 pub mod format;
 pub mod test_harness;
 pub mod tracing_setup;
 
+// Public re-exports
 pub use block_validation::BlockValidationError;
 pub use crypto::*;
 pub use invariants::InvariantViolation;
 pub use process::*;
 pub use state_tracking::{PendingVotes, StateIndex};
 pub use types::*;
+pub use voting::{Duplicate, QuorumTrack};
+
+// Constants shared across modules
+/// Complaint timeout (6Δ)
+pub(crate) const COMPLAIN_TIMEOUT: u128 = 6;
+
+/// End view timeout (12Δ)
+pub(crate) const END_VIEW_TIMEOUT: u128 = 12;
