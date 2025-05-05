@@ -3,7 +3,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// A unique identifier for a process
-#[derive(PartialEq, Clone, PartialOrd, Eq, Hash, Ord, Debug, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    PartialEq,
+    Clone,
+    PartialOrd,
+    Eq,
+    Hash,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct Identity(pub u64);
 
 /// Collects the public keys of all identities.
@@ -17,7 +29,18 @@ pub struct KeyBook {
     pub hints_setup: hints::UniverseSetup,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct Signed<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub data: T,
     pub author: Identity,
@@ -25,13 +48,35 @@ pub struct Signed<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub signature: hints::PartialSignature,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct ThreshSigned<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub data: T,
     pub signature: hints::Signature,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Serialize,
+    Deserialize,
+    CanonicalSerialize,
+    CanonicalDeserialize,
+)]
 pub struct ThreshPartial<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub data: T,
     pub author: Identity,

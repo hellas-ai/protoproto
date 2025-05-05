@@ -1,5 +1,6 @@
 use hellas_morpheus::{
-    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase, Signed, SlotNum, StartView, ThreshPartial, ThreshSigned, Transaction, ViewNum, VoteData
+    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase, Signed, SlotNum,
+    StartView, ThreshPartial, ThreshSigned, Transaction, ViewNum, VoteData,
 };
 use std::sync::Arc;
 

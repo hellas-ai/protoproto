@@ -54,13 +54,13 @@ pub enum TxGenPolicy {
 
 impl MockHarness {
     pub fn create_test_setup(num_parties: usize) -> MockHarness {
-        let domain_max = (1+num_parties).next_power_of_two();
+        let domain_max = (1 + num_parties).next_power_of_two();
         let gd = hints::GlobalData::new(domain_max, &mut test_rng()).unwrap();
-        let privs = vec![hints::SecretKey::random(&mut test_rng()); domain_max-1];
+        let privs = vec![hints::SecretKey::random(&mut test_rng()); domain_max - 1];
         let pubkeys: Vec<hints::PublicKey> = privs.iter().map(|sk| sk.public(&gd)).collect();
-        let weights = vec![hints::F::from(1); domain_max-1];
+        let weights = vec![hints::F::from(1); domain_max - 1];
 
-        let hints = (0..domain_max-1)
+        let hints = (0..domain_max - 1)
             .map(|i| hints::generate_hint(&gd, &privs[i], domain_max, i).unwrap())
             .collect::<Vec<_>>();
 

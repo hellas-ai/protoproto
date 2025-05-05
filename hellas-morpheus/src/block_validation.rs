@@ -191,11 +191,10 @@ impl MorpheusProcess {
     /// Validates a block according to the Morpheus protocol rules
     ///
     /// Returns Ok(()) if the block is valid, or the specific error that caused validation to fail
-    pub fn block_valid(&self, block: &Signed<Block>) -> Result<(), BlockValidationError> {
-        if !block.valid_signature(&self.kb) {
-            return Err(BlockValidationError::InvalidSignature);
-        }
-        let block = &block.data;
+    pub fn block_valid(&self, signed_block: &Signed<Block>) -> Result<(), BlockValidationError> {
+        let block = &signed_block.data;
+
+        // validate the genesis block, otherwise extract the author
         let author = if let BlockType::Genesis = block.key.type_ {
             if block.key == GEN_BLOCK_KEY
                 && block.prev.is_empty()
@@ -217,6 +216,10 @@ impl MorpheusProcess {
                 });
             }
         };
+
+        if !signed_block.valid_signature(&self.kb) {
+            return Err(BlockValidationError::InvalidSignature);
+        }
 
         if block.prev.is_empty() {
             return Err(BlockValidationError::EmptyPrevPointers);
@@ -260,8 +263,8 @@ impl MorpheusProcess {
                 return Err(BlockValidationError::InvalidOneQcSignature);
             }
         } else {
-            if block.one.data != self.genesis_qc.data {
-                return Err(BlockValidationError::InvalidOneQcSignature);
+            if *self.genesis_qc != block.one {
+                return Err(BlockValidationError::InvalidGenesisOneQc);
             }
         }
 

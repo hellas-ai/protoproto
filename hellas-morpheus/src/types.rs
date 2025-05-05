@@ -89,7 +89,6 @@ impl Valid for Transaction {
     }
 }
 
-
 #[derive(
     Clone,
     Copy,
@@ -290,8 +289,12 @@ impl CanonicalDeserialize for BlockData {
         let b = u8::deserialize_with_mode(&mut reader, compress, validate)?;
         match b {
             0 => Ok(BlockData::Genesis),
-            1 => Ok(BlockData::Tr { transactions: Vec::deserialize_with_mode(reader, compress, validate)? }),
-            2 => Ok(BlockData::Lead { justification: Vec::deserialize_with_mode(reader, compress, validate)? }),
+            1 => Ok(BlockData::Tr {
+                transactions: Vec::deserialize_with_mode(reader, compress, validate)?,
+            }),
+            2 => Ok(BlockData::Lead {
+                justification: Vec::deserialize_with_mode(reader, compress, validate)?,
+            }),
             _ => Err(ark_serialize::SerializationError::InvalidData),
         }
     }

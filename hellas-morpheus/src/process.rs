@@ -336,7 +336,7 @@ impl MorpheusProcess {
                     );
                     return false;
                 }
-                self.record_qc(&qc);
+                self.record_qc(qc);
                 if self.index.max_view.0 > self.view_i {
                     self.end_view(
                         Message::QC(self.index.qcs.get(&self.index.max_view.1).cloned().unwrap()),
@@ -416,7 +416,7 @@ impl MorpheusProcess {
                 if start_view.data.qc.data.z != 1 {
                     return false;
                 }
-                self.record_qc(&Arc::new(start_view.data.qc.clone()));
+                self.record_qc(Arc::new(start_view.data.qc.clone()));
                 self.start_views
                     .entry(start_view.data.view)
                     .or_insert(Vec::new())

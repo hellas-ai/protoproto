@@ -344,7 +344,7 @@ fn test_pending_votes_invariants() {
         z: 1,
         for_which: GEN_BLOCK_KEY.clone(),
     };
-    
+
     // Create a dummy threshold signature
     let gen_qc = ThreshSigned {
         data: gen_vote_data,
@@ -361,7 +361,7 @@ fn test_pending_votes_invariants() {
                 transactions: vec![],
             },
         },
-        &process.kb
+        &process.kb,
     );
 
     // Add the block to the process

@@ -187,7 +187,7 @@ impl MorpheusProcess {
         match self.vote_tracker.record_vote(vote_data.clone()) {
             Ok(num_votes) => {
                 if num_votes == self.n - self.f {
-                    // TODO: real crypto
+                    // make the signature
                     let votes_now = self
                         .vote_tracker
                         .votes
@@ -210,6 +210,8 @@ impl MorpheusProcess {
                         data: vote_data.data.clone(),
                         signature: signed,
                     });
+
+                    // 0-QCs for our own blocks need to be broadcast
                     if vote_data.data.z == 0
                         && vote_data.data.for_which.author.as_ref() == Some(&self.id)
                         && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
@@ -222,7 +224,7 @@ impl MorpheusProcess {
                         );
                         self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
                     }
-                    self.record_qc(&quorum_formed);
+                    self.record_qc(quorum_formed);
                 }
                 true
             }
@@ -243,7 +245,7 @@ impl MorpheusProcess {
     /// "For z ∈ {0,1,2}, if p_i receives a z-quorum or a z-QC for b,
     /// and if Q_i does not contain a z-QC for b, then p_i automatically
     /// enumerates a z-QC for b into Q_i"
-    pub fn record_qc(&mut self, qc: &Arc<ThreshSigned<VoteData>>) {
+    pub fn record_qc(&mut self, qc: Arc<ThreshSigned<VoteData>>) {
         if self.index.qcs.contains_key(&qc.data) {
             return;
         }
@@ -280,8 +282,9 @@ impl MorpheusProcess {
         if qc.data.z == 1 {
             self.index.all_1qc.insert(qc.clone());
 
-            // FIXME: should we compare against tips? all_1qc? max_1qc should be a chain,
-            // but maybe
+            // FIXME: should we compare against tips? all_1qc? successive max_1qc
+            // should be a chain, but maybe switching between them is sometimes
+            // helpful?
             if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Greater {
                 tracing_setup::protocol_transition(
                     &self.id,
@@ -301,6 +304,8 @@ impl MorpheusProcess {
         // TODO: don't do this _every_ time a qc is formed,
         //       batch up the changes and do some more efficient
         //       checking when we next need the tips? (isn't this right away?)
+
+        // incrementally maintain the tips, which is the maximal antichain of all blocks.
 
         let mut tips_to_yeet = BTreeSet::new();
         for tip in &self.index.tips {
@@ -333,7 +338,6 @@ impl MorpheusProcess {
         self.index.qcs.insert(qc.data.clone(), qc.clone());
 
         // now find all the waiting 2-qcs that this qc can finalize
-        // TODO: justify why this is correct according to the paper.
 
         let finalized_here = self
             .index
@@ -344,8 +348,8 @@ impl MorpheusProcess {
             .collect::<BTreeSet<_>>();
 
         if qc.data.z == 2 {
-            // IMPORTANT: QC observes itself, so make sure we add it AFTER we scan,
-            // otherwise this block will finalize itself.
+            // IMPORTANT: a QC observes itself, so make sure we add it AFTER
+            // we scan, otherwise this block will incorrectly finalize itself.
             self.index.unfinalized_2qc.insert(qc.data.clone());
         }
 
@@ -353,6 +357,7 @@ impl MorpheusProcess {
             .unfinalized_2qc
             .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
 
+        // finalize the blocks
         for finalized in finalized_here {
             tracing::debug!(target: "finalized", qc = ?finalized);
             self.index
@@ -365,12 +370,14 @@ impl MorpheusProcess {
                 .finalized
                 .insert(finalized.for_which.clone(), true);
 
+            // re-evaluate the pending votes for this view
             self.pending_votes
                 .entry(finalized.for_which.view)
                 .or_default()
                 .dirty = true;
         }
 
+        // start watching for 2-votes
         if qc.data.z == 1 {
             let pending = self
                 .pending_votes
@@ -397,10 +404,13 @@ impl MorpheusProcess {
             tracing::warn!(target: "duplicate_block", key = ?block.data.key);
             return;
         }
+
+        // max_height is needed for is_eligible_for_tr_2_vote
         if block.data.key.height > self.index.max_height.0 {
             tracing::debug!(target: "new_max_height", height = block.data.key.height, key = ?block.data.key);
             self.index.max_height = (block.data.key.height, block.data.key.clone());
         }
+
         if let Some(author) = &block.data.key.author {
             self.index
                 .block_index
@@ -408,6 +418,7 @@ impl MorpheusProcess {
                 .or_insert_with(Vec::new)
                 .push(block.clone());
 
+            // produced_lead_in_view is needed for leader_ready
             if block.data.key.type_ == BlockType::Lead && author == &self.id {
                 self.produced_lead_in_view.insert(block.data.key.view, true);
             }
@@ -420,6 +431,7 @@ impl MorpheusProcess {
             None
         );
 
+        // track the voting status for this block
         let pending = self.pending_votes.entry(block.data.key.view).or_default();
         match block.data.key.type_ {
             BlockType::Lead => {
@@ -441,6 +453,7 @@ impl MorpheusProcess {
             BlockType::Genesis => panic!("Why are we recording the genesis block?"),
         }
 
+        // track the points-to relationship for block_is_single_tip
         for qc in &block.data.prev {
             self.index
                 .block_pointed_by
@@ -448,14 +461,15 @@ impl MorpheusProcess {
                 .or_default()
                 .insert(block_key.clone());
         }
+
+        // record any QCs that are used as pointers in the block
         for qc in block
             .data
             .prev
             .iter()
             .chain(Some(&block.data.one).into_iter())
         {
-            // TODO: these Arc are temporary....
-            self.record_qc(&Arc::new(qc.clone()));
+            self.record_qc(Arc::new(qc.clone()));
         }
     }
 

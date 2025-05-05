@@ -35,19 +35,19 @@
 
 mod block_production;
 mod block_validation;
+mod crypto;
 mod invariants;
 mod process;
 mod state_tracking;
 mod types;
-mod crypto;
 
 pub mod format;
 pub mod test_harness;
 pub mod tracing_setup;
 
 pub use block_validation::BlockValidationError;
-pub use invariants::InvariantViolation;
-pub use state_tracking::{PendingVotes, StateIndex};
-pub use process::*;
-pub use types::*;
 pub use crypto::*;
+pub use invariants::InvariantViolation;
+pub use process::*;
+pub use state_tracking::{PendingVotes, StateIndex};
+pub use types::*;
