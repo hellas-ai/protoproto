@@ -35,6 +35,7 @@ pub struct KeyBook {
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     Debug,
     Serialize,
     Deserialize,
@@ -54,6 +55,7 @@ pub struct Signed<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     Debug,
     Serialize,
     Deserialize,
@@ -71,6 +73,7 @@ pub struct ThreshSigned<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     Debug,
     Serialize,
     Deserialize,
@@ -88,7 +91,8 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshSigned<T> {
         let verifier = keybook.hints_setup.verifier();
         let mut buf = Vec::new();
         T::serialize_compressed(&self.data, &mut buf).unwrap();
-        hints::verify_aggregate(&verifier, &self.signature, &buf).is_ok() && self.signature.threshold >= hints::F::from(threshold)
+        hints::verify_aggregate(&verifier, &self.signature, &buf).is_ok()
+            && self.signature.threshold >= hints::F::from(threshold)
     }
 }
 

@@ -12,11 +12,19 @@ use std::{
     sync::RwLock,
 };
 
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::test_rng;
 
 use serde::{Deserialize, Serialize};
 
 use crate::*;
+
+#[derive(
+    Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, CanonicalDeserialize, CanonicalSerialize,
+)]
+pub struct TestTransaction(pub Vec<u8>);
+
+impl Transaction for TestTransaction {}
 
 /// A basic simulation harness for MorpheusProcess
 #[derive(Clone)]
@@ -25,11 +33,11 @@ pub struct MockHarness {
     pub time: u128,
 
     /// The processes participating in the simulation
-    pub processes: BTreeMap<Identity, MorpheusProcess>,
+    pub processes: BTreeMap<Identity, MorpheusProcess<TestTransaction>>,
 
     /// Messages that are waiting to be delivered
     /// Each message is paired with its sender and destination (None means broadcast)
-    pub pending_messages: VecDeque<(Message, Identity, Option<Identity>)>,
+    pub pending_messages: VecDeque<(Message<TestTransaction>, Identity, Option<Identity>)>,
 
     /// Time increment to use when advancing time
     pub time_step: u128,
@@ -98,7 +106,7 @@ impl MockHarness {
     }
 
     /// Create a new mock harness with the given nodes
-    pub fn new(nodes: Vec<MorpheusProcess>, time_step: u128) -> Self {
+    pub fn new(nodes: Vec<MorpheusProcess<TestTransaction>>, time_step: u128) -> Self {
         let mut processes = BTreeMap::new();
 
         for mut node in nodes {
@@ -229,21 +237,21 @@ impl MockHarness {
                     if self.steps % n == 0 {
                         process
                             .ready_transactions
-                            .push(Transaction::Opaque(vec![1, 2, 3, 4]));
+                            .push(TestTransaction(vec![1, 2, 3, 4]));
                     }
                 }
                 Some(TxGenPolicy::OncePerView { prev_view }) => {
                     if process.view_i != prev_view.read().unwrap().unwrap_or(ViewNum(-1)) {
                         process
                             .ready_transactions
-                            .push(Transaction::Opaque(vec![1, 2, 3, 4]));
+                            .push(TestTransaction(vec![1, 2, 3, 4]));
                         *prev_view.write().unwrap() = Some(process.view_i);
                     }
                 }
                 Some(TxGenPolicy::Always) => {
                     process
                         .ready_transactions
-                        .push(Transaction::Opaque(vec![1, 2, 3, 4]));
+                        .push(TestTransaction(vec![1, 2, 3, 4]));
                 }
                 None | Some(TxGenPolicy::Never) => {
                     // Do nothing
@@ -273,7 +281,7 @@ impl MockHarness {
     /// Add a message to the pending queue
     pub fn enqueue_message(
         &mut self,
-        message: Message,
+        message: Message<TestTransaction>,
         sender: Identity,
         destination: Option<Identity>,
     ) {

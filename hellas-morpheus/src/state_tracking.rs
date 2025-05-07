@@ -19,10 +19,9 @@ pub struct PendingVotes {
 
 /// Tracks all structural state
 #[derive(Clone, Serialize, Deserialize)]
-pub struct StateIndex {
+pub struct StateIndex<Tr: Transaction> {
     /// Stores QCs indexed by their VoteData
     /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
 
     /// Stores all 1-QCs seen by this process
@@ -34,13 +33,11 @@ pub struct StateIndex {
 
     /// Maps block keys to blocks (part of M_i in pseudocode)
     /// Implements part of "the set of all received messages"
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub blocks: BTreeMap<BlockKey, Arc<Signed<Block>>>,
+    pub blocks: BTreeMap<BlockKey, Arc<Signed<Block<Tr>>>>,
 
     // === Performance optimization indexes ===
     /// Tracks which blocks point to which other blocks
     /// Used to efficiently determine the DAG structure
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub block_pointed_by: BTreeMap<BlockKey, BTreeSet<BlockKey>>,
 
     /// Tracks the maximum view seen and its associated VoteData
@@ -61,42 +58,38 @@ pub struct StateIndex {
 
     /// Maps block keys to their finalization status
     /// Used to track which blocks have been finalized
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub finalized: BTreeMap<BlockKey, bool>,
 
     /// Maps block keys to their unfinalized QCs
     /// Used to track which QCs are not yet finalized
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub unfinalized: BTreeMap<BlockKey, BTreeSet<VoteData>>,
 
     /// Tracks whether we've seen a leader block for each view
     /// Used to implement logic that depends on leader blocks within a view
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub contains_lead_by_view: BTreeMap<ViewNum, bool>,
 
     /// Maps views to sets of unfinalized leader blocks
     /// Tracks which leader blocks are not yet finalized by view
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
 
     /// Quick index to QCs by block type, author, and slot
     /// Enables O(1) lookup of QCs
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), Arc<ThreshSigned<VoteData>>>,
 
     /// Maps (type, author, view) to QCs for efficient retrieval
     /// Used to find QCs for a specific block type, author, and view
-    #[serde(with = "serde_json_any_key::any_key_map")]
     pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<Arc<ThreshSigned<VoteData>>>>,
 
     /// Maps (type, view, author) to blocks for efficient retrieval
     /// Used to find blocks of a specific type, view, and author
-    #[serde(with = "serde_json_any_key::any_key_map")]
-    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block>>>>,
+    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block<Tr>>>>>,
 }
 
-impl StateIndex {
-    pub fn new(genesis_qc: Arc<ThreshSigned<VoteData>>, genesis_block: Arc<Signed<Block>>) -> Self {
+impl<Tr: Transaction> StateIndex<Tr> {
+    pub fn new(
+        genesis_qc: Arc<ThreshSigned<VoteData>>,
+        genesis_block: Arc<Signed<Block<Tr>>>,
+    ) -> Self {
         Self {
             qcs: {
                 let mut map = BTreeMap::new();
@@ -144,7 +137,7 @@ impl StateIndex {
     }
 }
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// Records a new quorum certificate in this process's state
     ///
     /// This implements the automatic updating of Q_i from the pseudocode:
@@ -305,7 +298,7 @@ impl MorpheusProcess {
     /// updated and specifies the set of all received messages."
     ///
     /// It will also record any QCs that are used as pointers in the block.
-    pub fn record_block(&mut self, block: &Arc<Signed<Block>>) {
+    pub fn record_block(&mut self, block: &Arc<Signed<Block<Tr>>>) {
         if self.index.blocks.contains_key(&block.data.key) {
             tracing::warn!(target: "duplicate_block", key = ?block.data.key);
             return;

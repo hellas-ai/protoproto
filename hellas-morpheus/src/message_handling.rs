@@ -4,11 +4,11 @@ use ark_serialize::CanonicalSerialize;
 
 use crate::{format::format_message, *};
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     pub(crate) fn send_msg(
         &mut self,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-        message: (Message, Option<Identity>),
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+        message: (Message<Tr>, Option<Identity>),
     ) {
         if message.1.is_none() || message.1.as_ref().unwrap() == &self.id {
             // IMPORTANT: implements note from page 8:
@@ -23,9 +23,9 @@ impl MorpheusProcess {
     #[tracing::instrument(skip(self, sender, to_send), fields(process_id = ?self.id))]
     pub fn process_message(
         &mut self,
-        message: Message,
+        message: Message<Tr>,
         sender: Identity,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {
         // Check if we've seen this message before (duplicate detection)
         if cfg!(debug_assertions) {
@@ -190,5 +190,4 @@ impl MorpheusProcess {
 
         true
     }
-
 }

@@ -6,6 +6,7 @@ use ark_serialize::CanonicalDeserialize;
 use ark_serialize::CanonicalSerialize;
 use ark_serialize::Valid;
 
+use crate::Transaction;
 use crate::crypto::*;
 use crate::types::*;
 
@@ -155,7 +156,7 @@ pub fn format_start_view(start_view: &StartView, verbose: bool) -> String {
 }
 
 /// Format BlockData in a concise way
-pub fn format_block_data(data: &BlockData, verbose: bool) -> String {
+pub fn format_block_data<Tr: Transaction>(data: &BlockData<Tr>, verbose: bool) -> String {
     match data {
         BlockData::Genesis => "Genesis".to_string(),
         BlockData::Tr { transactions } => {
@@ -184,20 +185,12 @@ pub fn format_block_data(data: &BlockData, verbose: bool) -> String {
 }
 
 /// Format a Transaction in a concise way
-pub fn format_transaction(tx: &Transaction, verbose: bool) -> String {
-    match tx {
-        Transaction::Opaque(data) => {
-            if data.len() <= 4 || verbose {
-                format!("Tx{:?}", data)
-            } else {
-                format!("Tx[{} bytes]", data.len())
-            }
-        }
-    }
+pub fn format_transaction<Tr: Transaction>(tx: &Tr, _verbose: bool) -> String {
+    format!("Tx({:?})", tx)
 }
 
 /// Format a Block in a concise way
-pub fn format_block(block: &Block, verbose: bool) -> String {
+pub fn format_block<Tr: Transaction>(block: &Block<Tr>, verbose: bool) -> String {
     if verbose {
         format!(
             "Block{{ key: {}, prev: [{}], one: {}, data: {} }}",
@@ -222,7 +215,7 @@ pub fn format_block(block: &Block, verbose: bool) -> String {
 }
 
 /// Format a Message in a concise way
-pub fn format_message(message: &Message, verbose: bool) -> String {
+pub fn format_message<Tr: Transaction>(message: &Message<Tr>, verbose: bool) -> String {
     match message {
         Message::Block(signed_block) => {
             if verbose {

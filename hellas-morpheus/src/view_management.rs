@@ -5,7 +5,7 @@ use crate::*;
 const COMPLAIN_TIMEOUT: u128 = 6;
 const END_VIEW_TIMEOUT: u128 = 12;
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     pub fn set_now(&mut self, now: u128) {
         self.current_time = now;
     }
@@ -24,9 +24,9 @@ impl MorpheusProcess {
 
     pub(crate) fn end_view(
         &mut self,
-        cause: Message,
+        cause: Message<Tr>,
         new_view: ViewNum,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) {
         // Record view change with tracing
         crate::tracing_setup::protocol_transition(
@@ -79,7 +79,6 @@ impl MorpheusProcess {
         self.reevaluate_pending_votes(to_send);
     }
 
-
     /// Implements the "Complain" section from Algorithm 1
     ///
     /// Checks timeouts and sends complaints:
@@ -87,7 +86,7 @@ impl MorpheusProcess {
     ///  time 6Δ since entering view view_i: Send q to lead(view_i) if not previously sent;"
     /// "If ∃q ∈ Q_i which has not been finalized for time 12Δ since entering view view_i:
     ///  Send the end-view message (view_i) signed by p_i to all processes;"
-    pub fn check_timeouts(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
+    pub fn check_timeouts(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
         let time_in_view = self.current_time - self.view_entry_time;
 
         if time_in_view >= self.delta * COMPLAIN_TIMEOUT {

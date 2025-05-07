@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::*;
 
-use serde::{Serialize, Deserialize};
-use ark_serialize::{CanonicalSerialize, CanonicalDeserialize, Valid};
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 /// Tracks votes for a particular data type and helps form quorums
@@ -65,13 +65,13 @@ impl<
     }
 }
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     pub fn try_vote(
         &mut self,
         z: u8,
         block: &BlockKey,
         target: Option<Identity>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {
         tracing::debug!(target: "try_vote", z = z, block = ?block, target = ?target);
         let author = block.author.clone().expect("not voting for genesis block");
@@ -101,7 +101,7 @@ impl MorpheusProcess {
     pub fn record_vote(
         &mut self,
         vote_data: &Arc<ThreshPartial<VoteData>>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {
         tracing::debug!(target: "record_vote", vote_data = ?vote_data.data);
         match self.vote_tracker.record_vote(vote_data.clone()) {
@@ -160,7 +160,7 @@ impl MorpheusProcess {
     }
 
     /// Re-evaluate all pending votes based on current state
-    pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
+    pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
         // Only process votes for the current view
         let current_view = self.view_i;
 
@@ -236,7 +236,7 @@ impl MorpheusProcess {
         pending_votes: &mut BTreeMap<BlockKey, bool>,
         eligibility_check: F,
         phase_transition_reason: Option<&str>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) where
         F: Fn(&Self, &BlockKey) -> bool,
     {
@@ -268,6 +268,4 @@ impl MorpheusProcess {
 
         pending_votes.retain(|key, _| !processed_keys.contains(&key));
     }
-
-
 }

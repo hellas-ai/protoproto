@@ -187,11 +187,14 @@ impl fmt::Display for BlockValidationError {
     }
 }
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// Validates a block according to the Morpheus protocol rules
     ///
     /// Returns Ok(()) if the block is valid, or the specific error that caused validation to fail
-    pub fn block_valid(&self, signed_block: &Signed<Block>) -> Result<(), BlockValidationError> {
+    pub fn block_valid(
+        &self,
+        signed_block: &Signed<Block<Tr>>,
+    ) -> Result<(), BlockValidationError> {
         let block = &signed_block.data;
 
         // validate the genesis block, otherwise extract the author

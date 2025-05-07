@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::*;
 
-impl MorpheusProcess {
-    pub fn try_produce_blocks(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
+    pub fn try_produce_blocks(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
         if self.payload_ready() {
             self.make_tr_block(to_send);
         }
@@ -33,7 +33,7 @@ impl MorpheusProcess {
         has_transactions
     }
 
-    fn make_tr_block(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
+    fn make_tr_block(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
         let slot = self.slot_i_tr;
         let mut prev_qcs = Vec::new();
 
@@ -146,7 +146,7 @@ impl MorpheusProcess {
         false
     }
 
-    fn make_leader_block(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
+    fn make_leader_block(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
         let slot = self.slot_i_lead;
         let view = self.view_i;
 

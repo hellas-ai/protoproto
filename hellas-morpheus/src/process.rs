@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// maintaining all state required for processing messages, voting, and
 /// producing blocks according to the protocol specification.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct MorpheusProcess {
+pub struct MorpheusProcess<Tr: Transaction> {
     pub kb: KeyBook,
 
     /// Identity of this process (equivalent to p_i in the pseudocode)
@@ -83,7 +83,7 @@ pub struct MorpheusProcess {
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
-    pub index: StateIndex,
+    pub index: StateIndex<Tr>,
 
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
@@ -91,16 +91,16 @@ pub struct MorpheusProcess {
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 
     /// All messages received by this process
-    pub received_messages: BTreeSet<Message>,
+    pub received_messages: BTreeSet<Message<Tr>>,
 
-    pub genesis: Arc<Signed<Block>>,
+    pub genesis: Arc<Signed<Block<Tr>>>,
     pub genesis_qc: Arc<ThreshSigned<VoteData>>,
-    pub ready_transactions: Vec<Transaction>,
+    pub ready_transactions: Vec<Tr>,
 
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
 }
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     pub fn new(keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
         crate::tracing_setup::register_process(&id, n, f);
 

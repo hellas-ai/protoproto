@@ -48,6 +48,9 @@ pub mod format;
 pub mod test_harness;
 pub mod tracing_setup;
 
+use std::{fmt::Debug, hash::Hash};
+
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 pub use block_validation::BlockValidationError;
 pub use crypto::*;
 pub use invariants::InvariantViolation;
@@ -55,3 +58,8 @@ pub use process::*;
 pub use state_tracking::{PendingVotes, StateIndex};
 pub use types::*;
 pub use voting::*;
+
+pub trait Transaction:
+    Sync + Clone + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug
+{
+}

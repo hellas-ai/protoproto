@@ -407,7 +407,7 @@ impl fmt::Display for InvariantViolation {
     }
 }
 
-impl MorpheusProcess {
+impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// Checks key protocol invariants and returns a list of invariant violations
     ///
     /// This method is intended for testing purposes to ensure protocol invariants
