@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use ark_serialize::CanonicalSerialize;
 use serde::{Deserialize, Serialize};
 
 use crate::*;
@@ -146,99 +145,6 @@ impl StateIndex {
 }
 
 impl MorpheusProcess {
-    pub fn try_vote(
-        &mut self,
-        z: u8,
-        block: &BlockKey,
-        target: Option<Identity>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) -> bool {
-        tracing::debug!(target: "try_vote", z = z, block = ?block, target = ?target);
-        let author = block.author.clone().expect("not voting for genesis block");
-
-        if !self
-            .voted_i
-            .contains(&(z, block.type_, block.slot, author.clone()))
-        {
-            self.voted_i
-                .insert((z, block.type_, block.slot, author.clone()));
-
-            let voted = Arc::new(ThreshPartial::from_data(
-                VoteData {
-                    z,
-                    for_which: block.clone(),
-                },
-                &self.kb,
-            ));
-            self.send_msg(to_send, (Message::NewVote(voted.clone()), target));
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Returns false if the vote is a duplicate (sender already voted there)
-    pub fn record_vote(
-        &mut self,
-        vote_data: &Arc<ThreshPartial<VoteData>>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) -> bool {
-        tracing::debug!(target: "record_vote", vote_data = ?vote_data.data);
-        match self.vote_tracker.record_vote(vote_data.clone()) {
-            Ok(num_votes) => {
-                if num_votes == self.n - self.f {
-                    // make the signature
-                    let votes_now = self
-                        .vote_tracker
-                        .votes
-                        .get(&vote_data.data)
-                        .unwrap()
-                        .values()
-                        .map(|v| (v.author.0 as usize - 1, v.signature.clone()))
-                        .collect::<Vec<_>>();
-                    let agg = self.kb.hints_setup.aggregator();
-                    let mut data = Vec::new();
-                    vote_data.data.serialize_compressed(&mut data).unwrap();
-                    let signed = hints::sign_aggregate(
-                        &agg,
-                        hints::F::from((self.f + 1) as u64),
-                        &votes_now,
-                        &data,
-                    )
-                    .unwrap();
-                    let quorum_formed = Arc::new(ThreshSigned {
-                        data: vote_data.data.clone(),
-                        signature: signed,
-                    });
-
-                    // 0-QCs for our own blocks need to be broadcast
-                    if vote_data.data.z == 0
-                        && vote_data.data.for_which.author.as_ref() == Some(&self.id)
-                        && !self.zero_qcs_sent.contains(&vote_data.data.for_which)
-                    {
-                        self.zero_qcs_sent.insert(vote_data.data.for_which.clone());
-                        crate::tracing_setup::qc_formed(
-                            &self.id,
-                            vote_data.data.z,
-                            &vote_data.data,
-                        );
-                        self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
-                    }
-                    self.record_qc(quorum_formed);
-                }
-                true
-            }
-            Err(Duplicate) => {
-                tracing::error!(
-                    target: "duplicate_vote",
-                    vote_data = ?vote_data.data,
-                    author = ?vote_data.author
-                );
-                false
-            }
-        }
-    }
-
     /// Records a new quorum certificate in this process's state
     ///
     /// This implements the automatic updating of Q_i from the pseudocode:
@@ -484,7 +390,6 @@ impl MorpheusProcess {
     /// Implemented as a BFS on the points-to graph combined with a direct
     /// observation check.
     pub fn observes(&self, root: VoteData, needle: &VoteData) -> bool {
-        // do a BFS from root to see if it observes needle
         let mut observed = false;
         let mut to_visit: VecDeque<VoteData> = vec![root].into();
         while !to_visit.is_empty() {
@@ -532,120 +437,6 @@ impl MorpheusProcess {
             }
         }
         false
-    }
-
-    pub fn set_phase(&mut self, phase: Phase) {
-        self.phase_i.insert(self.view_i, phase);
-    }
-
-    /// Re-evaluate all pending votes based on current state
-    pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message, Option<Identity>)>) {
-        // Only process votes for the current view
-        let current_view = self.view_i;
-
-        let mut all_pending = std::mem::replace(&mut self.pending_votes, BTreeMap::new());
-
-        let pending = all_pending.entry(current_view).or_default();
-        if !pending.dirty {
-            return;
-        }
-
-        // First check global conditions for the current view
-        let contains_lead = self
-            .index
-            .contains_lead_by_view
-            .get(&current_view)
-            .copied()
-            .unwrap_or(false);
-        let unfinalized_lead_empty = self
-            .index
-            .unfinalized_lead_by_view
-            .get(&current_view)
-            .map_or(true, |set| set.is_empty());
-
-        // Only process transaction block votes if we have leader blocks and no unfinalized leader blocks
-        if contains_lead && unfinalized_lead_empty {
-            // Process transaction block votes (1-votes and 2-votes)
-            self.process_block_votes(
-                1,
-                &mut pending.tr_1,
-                |this, block_key| this.is_eligible_for_tr_1_vote(block_key),
-                Some("1-voted for a transaction block"),
-                to_send,
-            );
-
-            self.process_block_votes(
-                2,
-                &mut pending.tr_2,
-                |this, block_key| this.is_eligible_for_tr_2_vote(block_key),
-                Some("2-voted for a transaction block"),
-                to_send,
-            );
-        }
-
-        // Process leader block votes if we're still in high throughput phase
-        if self.phase_i.get(&current_view).unwrap_or(&Phase::High) == &Phase::High {
-            self.process_block_votes(
-                1,
-                &mut pending.lead_1,
-                |_, block_key| block_key.view == current_view,
-                None,
-                to_send,
-            );
-
-            self.process_block_votes(
-                2,
-                &mut pending.lead_2,
-                |_, block_key| block_key.view == current_view,
-                None,
-                to_send,
-            );
-        }
-
-        pending.dirty = false;
-        self.pending_votes = all_pending;
-    }
-
-    /// Generic method to process pending votes for blocks
-    ///
-    /// This handles both transaction and leader blocks for both 1-votes and 2-votes
-    fn process_block_votes<F>(
-        &mut self,
-        vote_level: u8,
-        pending_votes: &mut BTreeMap<BlockKey, bool>,
-        eligibility_check: F,
-        phase_transition_reason: Option<&str>,
-        to_send: &mut Vec<(Message, Option<Identity>)>,
-    ) where
-        F: Fn(&Self, &BlockKey) -> bool,
-    {
-        let mut processed_keys = Vec::new();
-
-        for block_key in pending_votes.keys().cloned() {
-            if eligibility_check(self, &block_key) {
-                if self.try_vote(vote_level, &block_key, None, to_send) {
-                    if block_key.type_ == BlockType::Tr && phase_transition_reason.is_some() {
-                        // If we voted for a transaction block, transition to low throughput phase
-                        crate::tracing_setup::protocol_transition(
-                            &self.id,
-                            "throughput phase",
-                            &Phase::High,
-                            &Phase::Low,
-                            phase_transition_reason,
-                        );
-                        self.set_phase(Phase::Low);
-                    }
-                    processed_keys.push(block_key);
-                } else {
-                    panic!(
-                        "Already {}-voted {:?}, pending votes desync bug",
-                        vote_level, block_key
-                    );
-                }
-            }
-        }
-
-        pending_votes.retain(|key, _| !processed_keys.contains(&key));
     }
 
     fn block_is_single_tip(&self, block_key: &BlockKey) -> bool {

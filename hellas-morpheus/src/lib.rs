@@ -37,9 +37,12 @@ mod block_production;
 mod block_validation;
 mod crypto;
 mod invariants;
+mod message_handling;
 mod process;
 mod state_tracking;
 mod types;
+mod view_management;
+mod voting;
 
 pub mod format;
 pub mod test_harness;
@@ -51,3 +54,4 @@ pub use invariants::InvariantViolation;
 pub use process::*;
 pub use state_tracking::{PendingVotes, StateIndex};
 pub use types::*;
+pub use voting::*;
