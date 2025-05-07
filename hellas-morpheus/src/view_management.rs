@@ -6,16 +6,20 @@ const COMPLAIN_TIMEOUT: u128 = 6;
 const END_VIEW_TIMEOUT: u128 = 12;
 
 impl MorpheusProcess {
+    pub fn set_now(&mut self, now: u128) {
+        self.current_time = now;
+    }
+
     pub fn set_phase(&mut self, phase: Phase) {
         self.phase_i.insert(self.view_i, phase);
     }
 
     pub fn verify_leader(&self, author: Identity, view: ViewNum) -> bool {
-        author.0 as usize == 1 + (view.0 as usize % self.n)
+        author.0 as u32 == 1 + (view.0 as u32 % self.n)
     }
 
     pub fn lead(&self, view: ViewNum) -> Identity {
-        Identity((view.0 as u64 % self.n as u64) + 1) // identities are 1-indexed... ok
+        Identity((view.0 as u32 % self.n as u32) + 1) // identities are 1-indexed... ok
     }
 
     pub(crate) fn end_view(

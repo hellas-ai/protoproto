@@ -125,17 +125,17 @@ impl StateIndex {
             unfinalized_lead_by_view: BTreeMap::new(),
 
             qc_by_slot: BTreeMap::from([(
-                (BlockType::Genesis, Identity(u64::MAX), SlotNum(0)),
+                (BlockType::Genesis, Identity(u32::MAX), SlotNum(0)),
                 genesis_qc.clone(),
             )]),
             qc_by_view: BTreeMap::from([(
-                (BlockType::Genesis, Identity(u64::MAX), ViewNum(-1)),
+                (BlockType::Genesis, Identity(u32::MAX), ViewNum(-1)),
                 vec![genesis_qc.clone()],
             )]),
             block_index: {
                 let mut map = BTreeMap::new();
                 map.insert(
-                    (BlockType::Genesis, ViewNum(-1), Identity(u64::MAX)),
+                    (BlockType::Genesis, ViewNum(-1), Identity(u32::MAX)),
                     vec![genesis_block.clone()],
                 );
                 map

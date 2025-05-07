@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
     CanonicalSerialize,
     CanonicalDeserialize,
 )]
-pub struct Identity(pub u64);
+pub struct Identity(pub u32);
 
 /// Collects the public keys of all identities.
 #[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
@@ -84,11 +84,11 @@ pub struct ThreshPartial<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
 }
 
 impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshSigned<T> {
-    pub fn valid_signature(&self, keybook: &KeyBook) -> bool {
+    pub fn valid_signature(&self, keybook: &KeyBook, threshold: u32) -> bool {
         let verifier = keybook.hints_setup.verifier();
         let mut buf = Vec::new();
         T::serialize_compressed(&self.data, &mut buf).unwrap();
-        hints::verify_aggregate(&verifier, &self.signature, &buf).is_ok()
+        hints::verify_aggregate(&verifier, &self.signature, &buf).is_ok() && self.signature.threshold >= hints::F::from(threshold)
     }
 }
 

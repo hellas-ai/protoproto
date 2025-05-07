@@ -67,11 +67,11 @@ impl MockHarness {
         let setup = hints::setup_universe(&gd, pubkeys.clone(), &hints, weights).unwrap();
 
         let keys: BTreeMap<Identity, hints::PublicKey> = (0..num_parties)
-            .map(|i| (Identity(i as u64 + 1), pubkeys[i].clone()))
+            .map(|i| (Identity(i as u32 + 1), pubkeys[i].clone()))
             .collect();
 
         let identities: BTreeMap<hints::PublicKey, Identity> = (0..num_parties)
-            .map(|i| (pubkeys[i].clone(), Identity(i as u64 + 1)))
+            .map(|i| (pubkeys[i].clone(), Identity(i as u32 + 1)))
             .collect();
 
         // Create processes with different identities
@@ -81,14 +81,14 @@ impl MockHarness {
                     KeyBook {
                         keys: keys.clone(),
                         identities: identities.clone(),
-                        me_identity: Identity(i as u64 + 1),
+                        me_identity: Identity(i as u32 + 1),
                         me_pub_key: pubkeys[i].clone(),
                         me_sec_key: privs[i].clone(),
                         hints_setup: setup.clone(),
                     },
-                    Identity(i as u64 + 1),
-                    num_parties,
-                    (num_parties - 1).div_ceil(3) / 3,
+                    Identity(i as u32 + 1),
+                    num_parties as u32,
+                    (num_parties as u32 - 1) / 3,
                 )
             })
             .collect();

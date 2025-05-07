@@ -1,7 +1,7 @@
 use tracing::{debug, error, info};
 
 /// Register a new Morpheus process with tracing
-pub fn register_process(id: &crate::Identity, n: usize, f: usize) {
+pub fn register_process(id: &crate::Identity, n: u32, f: u32) {
     info!(target: "register_process", process_id = ?id, total_processes = n, max_faulty = f);
 }
 

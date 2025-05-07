@@ -45,10 +45,10 @@ pub struct MorpheusProcess {
     pub phase_i: BTreeMap<ViewNum, Phase>,
 
     /// Total number of processes in the system
-    pub n: usize,
+    pub n: u32,
 
     /// Maximum number of faulty processes tolerated (n-f is the quorum size)
-    pub f: usize,
+    pub f: u32,
 
     /// Network delay parameter (Δ in pseudocode)
     /// Used for timeouts in the protocol (6Δ and 12Δ)
@@ -101,11 +101,9 @@ pub struct MorpheusProcess {
 }
 
 impl MorpheusProcess {
-    pub fn new(keybook: KeyBook, id: Identity, n: usize, f: usize) -> Self {
-        // Track process creation with tracing
+    pub fn new(keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
         crate::tracing_setup::register_process(&id, n, f);
 
-        // Create genesis block and its 1-QC
         let genesis_block = Arc::new(Signed {
             data: Block {
                 key: GEN_BLOCK_KEY,
@@ -119,7 +117,7 @@ impl MorpheusProcess {
                 },
                 data: BlockData::Genesis,
             },
-            author: Identity(u64::MAX),
+            author: Identity(u32::MAX),
             signature: hints::PartialSignature::default(),
         });
 
@@ -131,7 +129,6 @@ impl MorpheusProcess {
             signature: hints::Signature::default(),
         });
 
-        // Initialize with a recommended default timeout
         MorpheusProcess {
             kb: keybook,
             id,
@@ -148,7 +145,6 @@ impl MorpheusProcess {
             f,
             delta: 10, // 10 ... "units"
 
-            // Auxiliary fields
             end_views: QuorumTrack {
                 votes: BTreeMap::new(),
             },
@@ -177,9 +173,5 @@ impl MorpheusProcess {
             ready_transactions: Vec::new(),
             pending_votes: BTreeMap::new(),
         }
-    }
-
-    pub fn set_now(&mut self, now: u128) {
-        self.current_time = now;
     }
 }

@@ -106,7 +106,7 @@ impl MorpheusProcess {
         tracing::debug!(target: "record_vote", vote_data = ?vote_data.data);
         match self.vote_tracker.record_vote(vote_data.clone()) {
             Ok(num_votes) => {
-                if num_votes == self.n - self.f {
+                if num_votes >= (self.n - self.f) as usize {
                     // make the signature
                     let votes_now = self
                         .vote_tracker
@@ -121,7 +121,7 @@ impl MorpheusProcess {
                     vote_data.data.serialize_compressed(&mut data).unwrap();
                     let signed = hints::sign_aggregate(
                         &agg,
-                        hints::F::from((self.f + 1) as u64),
+                        hints::F::from((self.n - self.f) as u64),
                         &votes_now,
                         &data,
                     )

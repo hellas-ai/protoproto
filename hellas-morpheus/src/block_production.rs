@@ -78,7 +78,7 @@ impl MorpheusProcess {
             height,
             author: Some(self.id.clone()),
             slot,
-            hash: Some(BlockHash(self.id.0 * 0x100 + self.slot_i_tr.0)),
+            hash: Some(BlockHash(self.id.0 as u64 * 0x100 + self.slot_i_tr.0)),
         };
 
         let block = Block {
@@ -113,7 +113,7 @@ impl MorpheusProcess {
             let has_enough_view_messages = self
                 .start_views
                 .get(&view)
-                .map(|msgs| msgs.len() >= self.n - self.f)
+                .map(|msgs| msgs.len() >= self.n as usize - self.f as usize)
                 .unwrap_or(false);
 
             // Check for previous leader block QC if not at slot 0

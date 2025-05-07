@@ -240,7 +240,7 @@ impl MorpheusProcess {
                     },
                 );
             }
-            if prev != &*self.genesis_qc && !prev.valid_signature(&self.kb) {
+            if prev != &*self.genesis_qc && !prev.valid_signature(&self.kb, self.n - self.f) {
                 return Err(BlockValidationError::InvalidPrevQcSignature);
             }
         }
@@ -259,7 +259,7 @@ impl MorpheusProcess {
         }
 
         if block.one.data.for_which.type_ != BlockType::Genesis {
-            if !block.one.valid_signature(&self.kb) {
+            if !block.one.valid_signature(&self.kb, self.n - self.f) {
                 return Err(BlockValidationError::InvalidOneQcSignature);
             }
         } else {
@@ -353,10 +353,10 @@ impl MorpheusProcess {
                     let mut just: Vec<Arc<Signed<StartView>>> = justification.clone();
                     just.sort_by(|m1, m2| m1.author.cmp(&m2.author));
 
-                    if just.len() < self.n - self.f {
+                    if just.len() < self.n as usize - self.f as usize {
                         return Err(BlockValidationError::InvalidJustificationSize {
                             size: just.len(),
-                            expected: self.n - self.f,
+                            expected: (self.n - self.f) as usize,
                         });
                     }
 

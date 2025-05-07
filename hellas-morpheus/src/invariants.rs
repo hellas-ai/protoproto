@@ -513,7 +513,7 @@ impl MorpheusProcess {
                     .for_which
                     .author
                     .clone()
-                    .unwrap_or(Identity(u64::MAX)),
+                    .unwrap_or(Identity(u32::MAX)),
                 vote_data.for_which.slot,
             );
             if let Some(indexed_qc) = self.index.qc_by_slot.get(&index_key) {
@@ -537,7 +537,7 @@ impl MorpheusProcess {
                     .for_which
                     .author
                     .clone()
-                    .unwrap_or(Identity(u64::MAX)),
+                    .unwrap_or(Identity(u32::MAX)),
                 vote_data.for_which.view,
             );
             if let Some(view_qcs) = self.index.qc_by_view.get(&view_key) {
@@ -749,7 +749,7 @@ impl MorpheusProcess {
             }
         }
         for (vote_data, &received_count) in &vote_counts {
-            if received_count >= self.n - self.f {
+            if received_count >= (self.n - self.f) as usize {
                 if !self.index.qcs.contains_key(vote_data) {
                     violations.push(InvariantViolation::MissingQCDespiteQuorum {
                         vote_data: vote_data.clone(),

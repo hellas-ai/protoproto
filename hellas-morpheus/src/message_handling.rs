@@ -79,7 +79,7 @@ impl MorpheusProcess {
                 self.record_vote(&vote_data, to_send);
             }
             Message::QC(qc) => {
-                if !qc.valid_signature(&self.kb) {
+                if !qc.valid_signature(&self.kb, self.n - self.f) {
                     tracing::error!(
                         target: "invalid_qc",
                         process_id = ?self.id,
@@ -107,7 +107,7 @@ impl MorpheusProcess {
                 }
                 match self.end_views.record_vote(end_view.clone()) {
                     Ok(num_votes) => {
-                        if end_view.data >= self.view_i && num_votes >= self.f + 1 {
+                        if end_view.data >= self.view_i && num_votes >= self.f as usize + 1 {
                             let votes_now = self
                                 .end_views
                                 .votes
@@ -142,7 +142,7 @@ impl MorpheusProcess {
                 }
             }
             Message::EndViewCert(end_view_cert) => {
-                if !end_view_cert.valid_signature(&self.kb) {
+                if !end_view_cert.valid_signature(&self.kb, self.f + 1) {
                     tracing::error!(
                         target: "invalid_end_view_cert",
                         process_id = ?self.id,
