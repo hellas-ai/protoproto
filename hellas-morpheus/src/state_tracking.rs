@@ -55,6 +55,9 @@ pub struct StateIndex<Tr: Transaction> {
     /// 1-QC for the leader block we produced in our previous slot
     pub latest_leader_1qc: Option<FinishedQC>,
 
+    /// z-QC for the leader block we produced in our previous slot
+    pub latest_leader_qc: Option<FinishedQC>,
+
     /// z-QC for the transaction block we produced in our previous slot
     pub latest_tr_qc: Option<FinishedQC>,
 
@@ -91,6 +94,7 @@ impl<Tr: Transaction> StateIndex<Tr> {
             max_height: (0, GEN_BLOCK_KEY),
             max_1qc: genesis_qc.clone(),
             latest_leader_1qc: None,
+            latest_leader_qc: None,
             latest_tr_qc: None,
             all_1qc: BTreeSet::new(),
             tips: vec![genesis_qc.data.clone()],
@@ -128,11 +132,13 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
             if author == &self.id
-                && qc.data.z == 1
                 && qc.data.for_which.type_ == BlockType::Lead
                 && qc.data.for_which.slot.is_pred(self.slot_i_lead)
             {
-                self.index.latest_leader_1qc = Some(qc.clone());
+                self.index.latest_leader_qc = Some(qc.clone());
+                if qc.data.z == 1 {
+                    self.index.latest_leader_1qc = Some(qc.clone());
+                }
             }
 
             if author == &self.id

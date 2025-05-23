@@ -119,16 +119,23 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             .map(|qc| qc.data.for_which.slot.is_pred(slot))
             .unwrap_or(false);
 
+        let latest_lead_qc_made = self
+            .index
+            .latest_leader_qc
+            .as_ref()
+            .map(|qc| qc.data.for_which.slot.is_pred(slot))
+            .unwrap_or(false);
+
         let has_enough_view_messages = self
             .start_views
             .get(&view)
             .map(|msgs| msgs.len() >= self.n as usize - self.f as usize)
             .unwrap_or(false);
 
-        if !has_produced_lead_block {
-            return has_enough_view_messages && (slot.is_zero() || latest_lead_1qc_made);
-        } else {
+        if has_produced_lead_block {
             latest_lead_1qc_made
+        } else {
+            has_enough_view_messages && (slot.is_zero() || latest_lead_qc_made)
         }
     }
 
@@ -146,7 +153,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         if !slot.is_zero() {
             if let Some(prev_qc) = self
                 .index
-                .latest_leader_1qc
+                .latest_leader_qc
                 .as_ref()
                 .filter(|qc| qc.data.for_which.slot.is_pred(slot))
             {
@@ -156,6 +163,8 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 {
                     prev_qcs.push(prev_qc.clone());
                 }
+            } else {
+                unreachable!("leader ready was supposed to make sure latest_leader_qc was set")
             }
         }
 
@@ -182,6 +191,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 .cloned()
                 .unwrap_or_else(|| self.index.max_1qc.clone());
 
+            // FIXME: we could return max_1qc here, the max_qc just needs to weakly dominate the justification
             (max_qc, view_messages)
         } else {
             let prev_leader_qc = self
@@ -216,6 +226,5 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         self.send_msg(to_send, (Message::Block(signed_block), None));
 
         self.slot_i_lead = SlotNum(self.slot_i_lead.0 + 1);
-        self.index.latest_leader_1qc = None;
     }
 }
