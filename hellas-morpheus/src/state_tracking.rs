@@ -154,18 +154,13 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             // should form a chain, but maybe switching between them is
             // sometimes helpful even when they're equal?
             if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Greater {
-                tracing_setup::protocol_transition(
-                    &self.id,
-                    "updating max 1-QC",
-                    &self.index.max_1qc.data,
-                    &qc.data,
-                    Some("new qc is greater than current max 1-QC"),
-                );
+                tracing::debug!(target: "new_max_1qc", old_max_1qc = ?self.index.max_1qc.data, new_1qc = ?qc.data);
                 self.index.max_1qc = qc.clone();
             }
         }
 
         if qc.data.for_which.view > self.index.max_view.0 {
+            tracing::debug!(target: "new_max_view", old_max_view = ?self.index.max_view, new_block = ?qc.data.for_which);
             self.index.max_view = (qc.data.for_which.view, qc.clone());
         }
 
@@ -181,14 +176,14 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             // in favor of the new qc
             if self.observes(qc.data.clone(), &tip.data) {
                 tips_to_yeet.insert(tip.clone());
-                tracing::info!(target: "yeet_tip", new_tip = ?qc.data, old_tip = ?tip.data);
+                tracing::debug!(target: "yeet_tip", new_tip = ?qc.data, old_tip = ?tip.data);
             }
         }
         if !tips_to_yeet.is_empty() {
             // this qc is a new tip because it observes some existing tips
             self.index.tips.retain(|tip| !tips_to_yeet.contains(tip));
             self.index.tips.push(qc.clone());
-            tracing::info!(target: "new_tip", qc = ?qc.data);
+            tracing::debug!(target: "new_tip", reason = "extends existing tip", qc = ?qc.data);
         } else {
             // this qc still might be a new tip if none of the existing tips observe it
             if !self
@@ -198,7 +193,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 .any(|tip| self.observes(tip.data.clone(), &qc.data))
             {
                 self.index.tips.push(qc.clone());
-                tracing::info!(target: "new_tip", qc = ?qc.data);
+                tracing::debug!(target: "new_tip", reason = "new branch", qc = ?qc.data);
             }
         }
 
@@ -224,7 +219,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // finalize the blocks
         for finalized in finalized_here {
-            tracing::debug!(target: "finalized", qc = ?finalized);
+            tracing::debug!(target: "finalized_block", cause_qc = ?finalized, key = ?finalized.data.for_which);
             self.index
                 .unfinalized_lead_by_view
                 .entry(finalized.data.for_which.view)
@@ -272,7 +267,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // max_height is needed for is_eligible_for_tr_2_vote
         if block.data.key.height > self.index.max_height.0 {
-            tracing::debug!(target: "new_max_height", height = block.data.key.height, key = ?block.data.key);
+            tracing::debug!(target: "new_max_height", prev_height = ?self.index.max_height, key = ?block.data.key);
             self.index.max_height = (block.data.key.height, block.data.key.clone());
         }
 
