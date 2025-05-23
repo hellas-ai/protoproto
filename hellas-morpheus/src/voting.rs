@@ -168,6 +168,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         let pending = all_pending.entry(current_view).or_default();
         if !pending.dirty {
+            self.pending_votes = all_pending;
             return;
         }
 
