@@ -292,7 +292,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                         data_type: BlockType::Tr,
                     });
                 }
-                if block.key.slot > SlotNum(0) {
+                if !block.key.slot.is_zero() {
                     if !block.prev.iter().any(|qc| {
                         qc.data.for_which.type_ == BlockType::Tr
                             && qc.data.for_which.author == Some(author.clone())
@@ -333,7 +333,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     })
                     .collect();
 
-                if block.key.slot > SlotNum(0) {
+                if !block.key.slot.is_zero() {
                     if prev_leader_for.len() != 1 {
                         return Err(BlockValidationError::MissingPredecessorLeadBlock {
                             slot: block.key.slot,
@@ -350,7 +350,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     }
                 }
 
-                if block.key.slot == SlotNum(0)
+                if block.key.slot.is_zero()
                     || prev_leader_for[0].data.for_which.view < block.key.view
                 {
                     let mut just: Vec<Arc<Signed<StartView>>> = justification.clone();
