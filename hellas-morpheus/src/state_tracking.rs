@@ -20,9 +20,6 @@ pub struct PendingVotes {
 /// Tracks all structural state
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StateIndex<Tr: Transaction> {
-    /// Stores all 1-QCs seen by this process
-    pub all_1qc: BTreeSet<FinishedQC>,
-
     /// Stores the current tips of the block DAG
     /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
     pub tips: Vec<FinishedQC>,
@@ -87,7 +84,6 @@ impl<Tr: Transaction> StateIndex<Tr> {
             latest_leader_1qc: None,
             latest_leader_qc: None,
             latest_tr_qc: None,
-            all_1qc: BTreeSet::new(),
             tips: vec![genesis_qc.clone()],
             blocks: {
                 let mut map = BTreeMap::new();
@@ -158,11 +154,9 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             .insert(qc.clone());
 
         if qc.data.z == 1 {
-            self.index.all_1qc.insert(qc.clone());
-
-            // FIXME: should we compare against tips? all_1qc? successive max_1qc
-            // should be a chain, but maybe switching between them is sometimes
-            // helpful?
+            // FIXME: should we compare against tips? successive max_1qc
+            // should form a chain, but maybe switching between them is
+            // sometimes helpful even when they're equal?
             if self.index.max_1qc.data.compare_qc(&qc.data) != Ordering::Greater {
                 tracing_setup::protocol_transition(
                     &self.id,
@@ -422,10 +416,8 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         let block = self.index.blocks.get(block_key).unwrap();
-        self.index
-            .all_1qc
-            .iter()
-            .all(|qc| block.data.one.data.compare_qc(&qc.data) != Ordering::Less)
+
+        block.data.one.data.compare_qc(&self.index.max_1qc.data) != Ordering::Less
     }
 
     pub(crate) fn is_eligible_for_tr_2_vote(&self, block_key: &BlockKey) -> bool {
