@@ -558,10 +558,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 let should_be_final = observed_by_any;
 
                 // Check if it's actually marked as final
-                let is_marked_final = self
-                    .index
-                    .finalized
-                    .contains(block_key);
+                let is_marked_final = self.index.finalized.contains(block_key);
 
                 if should_be_final && !is_marked_final {
                     violations.push(InvariantViolation::BlockWithObserved2QcNotFinalized {
@@ -625,12 +622,12 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // Check finalization consistency
         for key in &self.index.finalized {
-                // If finalized, it shouldn't be in unfinalized
-                if self.index.unfinalized.contains_key(key) {
-                    violations.push(InvariantViolation::BlockFinalizedButAlsoUnfinalized {
-                        block: key.clone(),
-                    });
-                }
+            // If finalized, it shouldn't be in unfinalized
+            if self.index.unfinalized.contains_key(key) {
+                violations.push(InvariantViolation::BlockFinalizedButAlsoUnfinalized {
+                    block: key.clone(),
+                });
+            }
         }
 
         // Check unfinalized_2qc consistency
@@ -721,11 +718,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     continue;
                 }
 
-                if self
-                    .index
-                    .finalized
-                    .contains(block_key)
-                {
+                if self.index.finalized.contains(block_key) {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -757,11 +750,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     continue;
                 }
 
-                if self
-                    .index
-                    .finalized
-                    .contains(block_key)
-                {
+                if self.index.finalized.contains(block_key) {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -792,11 +781,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     continue;
                 }
 
-                if self
-                    .index
-                    .finalized
-                    .contains(block_key)
-                {
+                if self.index.finalized.contains(block_key) {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -828,11 +813,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     continue;
                 }
 
-                if self
-                    .index
-                    .finalized
-                    .contains(block_key)
-                {
+                if self.index.finalized.contains(block_key) {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
                         block_key: block_key.clone(),
@@ -859,10 +840,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 for (block_key, _) in &self.index.blocks {
                     if block_key.type_ == BlockType::Tr
                         && block_key.view == self.view_i
-                        && !self
-                            .index
-                            .finalized
-                            .contains(block_key)
+                        && !self.index.finalized.contains(block_key)
                         && self.is_eligible_for_tr_1_vote(block_key)
                         && !pending.tr_1.contains_key(block_key)
                     {
@@ -878,10 +856,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     if vote_data.z == 1
                         && vote_data.for_which.type_ == BlockType::Tr
                         && vote_data.for_which.view == self.view_i
-                        && !self
-                            .index
-                            .finalized
-                            .contains(&vote_data.for_which)
+                        && !self.index.finalized.contains(&vote_data.for_which)
                         && self.is_eligible_for_tr_2_vote(&vote_data.for_which)
                         && !pending.tr_2.contains_key(&vote_data.for_which)
                     {
