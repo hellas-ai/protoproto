@@ -201,7 +201,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         let author = if let BlockType::Genesis = block.key.type_ {
             if block.key == GEN_BLOCK_KEY
                 && block.prev.is_empty()
-                && block.one == *self.genesis_qc
+                && block.one == self.genesis_qc
                 && block.data == BlockData::Genesis
             {
                 return Ok(());
@@ -243,7 +243,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     },
                 );
             }
-            if prev != &*self.genesis_qc && !prev.valid_signature(&self.kb, self.n - self.f) {
+            if prev != &self.genesis_qc && !prev.valid_signature(&self.kb, self.n - self.f) {
                 return Err(BlockValidationError::InvalidPrevQcSignature);
             }
         }
@@ -266,7 +266,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 return Err(BlockValidationError::InvalidOneQcSignature);
             }
         } else {
-            if *self.genesis_qc != block.one {
+            if self.genesis_qc != block.one {
                 return Err(BlockValidationError::InvalidGenesisOneQc);
             }
         }
@@ -323,7 +323,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     });
                 }
 
-                let prev_leader_for: Vec<&ThreshSigned<VoteData>> = block
+                let prev_leader_for: Vec<&Arc<ThreshSigned<VoteData>>> = block
                     .prev
                     .iter()
                     .filter(|qc| {

@@ -1,6 +1,7 @@
 use hellas_morpheus::{
     Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase, Signed, SlotNum,
     StartView, ThreshPartial, ThreshSigned, Transaction, ViewNum, VoteData,
+    test_harness::TestTransaction,
 };
 use std::sync::Arc;
 
@@ -33,10 +34,10 @@ fn test_format_functions() {
         signature: hints::PartialSignature::default(),
     };
 
-    let thresh_signed_vote = ThreshSigned {
+    let thresh_signed_vote = Arc::new(ThreshSigned {
         data: vote_data.clone(),
         signature: hints::Signature::default(),
-    };
+    });
 
     // Create a block
     let block = Block {
@@ -44,7 +45,7 @@ fn test_format_functions() {
         prev: vec![thresh_signed_vote.clone()],
         one: thresh_signed_vote.clone(),
         data: BlockData::Tr {
-            transactions: vec![Transaction::Opaque(vec![1, 2, 3, 4])],
+            transactions: vec![TestTransaction(vec![1, 2, 3, 4])],
         },
     };
 
@@ -58,7 +59,7 @@ fn test_format_functions() {
     let messages = vec![
         Message::Block(signed_block.clone()),
         Message::NewVote(Arc::new(signed_vote.clone())),
-        Message::QC(Arc::new(thresh_signed_vote.clone())),
+        Message::QC(thresh_signed_vote.clone()),
         Message::EndView(Arc::new(ThreshPartial {
             data: view_num,
             author: identity.clone(),

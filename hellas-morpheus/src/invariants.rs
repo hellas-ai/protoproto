@@ -56,11 +56,6 @@ pub enum InvariantViolation {
         vote_data: VoteData,
         qc_index: String,
     },
-    QcNotInQcByView {
-        vote_data: VoteData,
-        view_key: (BlockType, Identity, ViewNum),
-    },
-
     // Tips related violations
     TipsMissingQCs {
         missing_tips: Vec<VoteData>,
@@ -243,16 +238,6 @@ impl fmt::Display for InvariantViolation {
                 f,
                 "QC {:?} not found in qc_index:\n{:?}",
                 vote_data, qc_index
-            ),
-
-            Self::QcNotInQcByView {
-                vote_data,
-                view_key,
-            } => write!(
-                f,
-                "QC {:?} not found in qc_by_view for key {:?}",
-                format_vote_data(vote_data, false),
-                view_key
             ),
 
             Self::TipsMissingQCs { missing_tips } => write!(
@@ -527,30 +512,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 violations.push(InvariantViolation::QcNotInQcIndex {
                     vote_data: vote_data.clone(),
                     qc_index: format!("{:?}", self.index.qc_by_slot),
-                });
-            }
-
-            // Check that QC is correctly indexed in qc_by_view
-            let view_key = (
-                vote_data.for_which.type_,
-                vote_data
-                    .for_which
-                    .author
-                    .clone()
-                    .unwrap_or(Identity(u32::MAX)),
-                vote_data.for_which.view,
-            );
-            if let Some(view_qcs) = self.index.qc_by_view.get(&view_key) {
-                if !view_qcs.iter().any(|q| &q.data == vote_data) {
-                    violations.push(InvariantViolation::QcNotInQcByView {
-                        vote_data: vote_data.clone(),
-                        view_key,
-                    });
-                }
-            } else {
-                violations.push(InvariantViolation::QcNotInQcByView {
-                    vote_data: vote_data.clone(),
-                    view_key,
                 });
             }
         }

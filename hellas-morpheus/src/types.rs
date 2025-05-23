@@ -160,6 +160,8 @@ pub struct VoteData {
     pub for_which: BlockKey,
 }
 
+pub type FinishedQC = Arc<ThreshSigned<VoteData>>;
+
 impl std::fmt::Debug for VoteData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", format::format_vote_data(self, false))
@@ -199,7 +201,7 @@ pub struct StartView {
 
     /// The maximal 1-QC seen by this process
     /// This is used by the new leader to determine which blocks to build upon
-    pub qc: ThreshSigned<VoteData>,
+    pub qc: FinishedQC,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -281,8 +283,8 @@ impl<Tr: CanonicalDeserialize> CanonicalDeserialize for BlockData<Tr> {
 )]
 pub struct Block<Tr: Transaction> {
     pub key: BlockKey,
-    pub prev: Vec<ThreshSigned<VoteData>>,
-    pub one: ThreshSigned<VoteData>,
+    pub prev: Vec<FinishedQC>,
+    pub one: FinishedQC,
     pub data: BlockData<Tr>,
 }
 
@@ -296,7 +298,7 @@ impl<Tr: Transaction> std::fmt::Debug for Block<Tr> {
 pub enum Message<Tr: Transaction> {
     Block(Arc<Signed<Block<Tr>>>),
     NewVote(Arc<ThreshPartial<VoteData>>),
-    QC(Arc<ThreshSigned<VoteData>>),
+    QC(FinishedQC),
     EndView(Arc<ThreshPartial<ViewNum>>),
     EndViewCert(Arc<ThreshSigned<ViewNum>>),
     StartView(Arc<Signed<StartView>>),

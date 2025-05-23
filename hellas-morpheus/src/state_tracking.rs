@@ -22,10 +22,10 @@ pub struct PendingVotes {
 pub struct StateIndex<Tr: Transaction> {
     /// Stores QCs indexed by their VoteData
     /// Part of Q_i in pseudocode - "stores at most one z-QC for each block"
-    pub qcs: BTreeMap<VoteData, Arc<ThreshSigned<VoteData>>>,
+    pub qcs: BTreeMap<VoteData, FinishedQC>,
 
     /// Stores all 1-QCs seen by this process
-    pub all_1qc: BTreeSet<Arc<ThreshSigned<VoteData>>>,
+    pub all_1qc: BTreeSet<FinishedQC>,
 
     /// Stores the current tips of the block DAG
     /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
@@ -50,7 +50,10 @@ pub struct StateIndex<Tr: Transaction> {
     /// Stores the maximum 1-QC seen by this process
     /// Used when entering a new view: "Send (v, q') signed by p_i to lead(v),
     /// where q' is a maximal amongst 1-QCs seen by p_i"
-    pub max_1qc: Arc<ThreshSigned<VoteData>>,
+    pub max_1qc: FinishedQC,
+
+    /// 1-QC for the leader block we produced in our previous slot
+    pub latest_leader_1qc: Option<FinishedQC>,
 
     /// Tracks unfinalized blocks with 2-QC
     /// Used to identify blocks that have 2-QC but are not yet finalized
@@ -74,22 +77,11 @@ pub struct StateIndex<Tr: Transaction> {
 
     /// Quick index to QCs by block type, author, and slot
     /// Enables O(1) lookup of QCs
-    pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), Arc<ThreshSigned<VoteData>>>,
-
-    /// Maps (type, author, view) to QCs for efficient retrieval
-    /// Used to find QCs for a specific block type, author, and view
-    pub qc_by_view: BTreeMap<(BlockType, Identity, ViewNum), Vec<Arc<ThreshSigned<VoteData>>>>,
-
-    /// Maps (type, view, author) to blocks for efficient retrieval
-    /// Used to find blocks of a specific type, view, and author
-    pub block_index: BTreeMap<(BlockType, ViewNum, Identity), Vec<Arc<Signed<Block<Tr>>>>>,
+    pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), FinishedQC>,
 }
 
 impl<Tr: Transaction> StateIndex<Tr> {
-    pub fn new(
-        genesis_qc: Arc<ThreshSigned<VoteData>>,
-        genesis_block: Arc<Signed<Block<Tr>>>,
-    ) -> Self {
+    pub fn new(genesis_qc: FinishedQC, genesis_block: Arc<Signed<Block<Tr>>>) -> Self {
         Self {
             qcs: {
                 let mut map = BTreeMap::new();
@@ -99,6 +91,7 @@ impl<Tr: Transaction> StateIndex<Tr> {
             max_view: (ViewNum(-1), genesis_qc.data.clone()),
             max_height: (0, GEN_BLOCK_KEY),
             max_1qc: genesis_qc.clone(),
+            latest_leader_1qc: None,
             all_1qc: BTreeSet::new(),
             tips: vec![genesis_qc.data.clone()],
             blocks: {
@@ -121,18 +114,6 @@ impl<Tr: Transaction> StateIndex<Tr> {
                 (BlockType::Genesis, Identity(u32::MAX), SlotNum(0)),
                 genesis_qc.clone(),
             )]),
-            qc_by_view: BTreeMap::from([(
-                (BlockType::Genesis, Identity(u32::MAX), ViewNum(-1)),
-                vec![genesis_qc.clone()],
-            )]),
-            block_index: {
-                let mut map = BTreeMap::new();
-                map.insert(
-                    (BlockType::Genesis, ViewNum(-1), Identity(u32::MAX)),
-                    vec![genesis_block.clone()],
-                );
-                map
-            },
         }
     }
 }
@@ -144,7 +125,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// "For z ∈ {0,1,2}, if p_i receives a z-quorum or a z-QC for b,
     /// and if Q_i does not contain a z-QC for b, then p_i automatically
     /// enumerates a z-QC for b into Q_i"
-    pub fn record_qc(&mut self, qc: Arc<ThreshSigned<VoteData>>) {
+    pub fn record_qc(&mut self, qc: FinishedQC) {
         if self.index.qcs.contains_key(&qc.data) {
             return;
         }
@@ -160,15 +141,14 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 qc.clone(),
             );
 
-            self.index
-                .qc_by_view
-                .entry((
-                    qc.data.for_which.type_,
-                    author.clone(),
-                    qc.data.for_which.view,
-                ))
-                .or_insert_with(Vec::new)
-                .push(qc.clone());
+            if author == &self.id
+                && qc.data.z == 1
+                && qc.data.for_which.type_ == BlockType::Lead
+                && qc.data.for_which.view == self.view_i
+                && qc.data.for_which.slot.is_pred(self.slot_i_lead)
+            {
+                self.index.latest_leader_1qc = Some(qc.clone());
+            }
         }
 
         // all new qcs are unfinalized until proven otherwise
@@ -311,12 +291,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         if let Some(author) = &block.data.key.author {
-            self.index
-                .block_index
-                .entry((block.data.key.type_, block.data.key.view, author.clone()))
-                .or_insert_with(Vec::new)
-                .push(block.clone());
-
             // produced_lead_in_view is needed for leader_ready
             if block.data.key.type_ == BlockType::Lead && author == &self.id {
                 self.produced_lead_in_view.insert(block.data.key.view, true);
@@ -362,14 +336,10 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         // record any QCs that are used as pointers in the block
-        for qc in block
-            .data
-            .prev
-            .iter()
-            .chain(Some(&block.data.one).into_iter())
-        {
-            self.record_qc(Arc::new(qc.clone()));
+        for qc in &block.data.prev {
+            self.record_qc(qc.clone())
         }
+        self.record_qc(block.data.one.clone());
     }
 
     /// Determines if one QC observes another according to the observes relation ⪰

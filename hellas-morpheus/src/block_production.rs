@@ -83,8 +83,8 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         let block = Block {
             key: block_key.clone(),
-            prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
-            one: ThreshSigned::clone(&max_1qc),
+            prev: prev_qcs,
+            one: max_1qc.clone(),
             data: BlockData::Tr {
                 transactions: std::mem::take(&mut self.ready_transactions),
             },
@@ -131,16 +131,12 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         if has_produced_lead_block && slot.0 > 0 {
-            let prev_qcs = self
+            return self
                 .index
-                .qc_by_view
-                .get(&(BlockType::Lead, self.id.clone(), view));
-
-            if let Some(prev_qcs) = prev_qcs {
-                return prev_qcs
-                    .iter()
-                    .any(|qc| qc.data.z == 1 && qc.data.for_which.slot == SlotNum(slot.0 - 1));
-            }
+                .latest_leader_1qc
+                .as_ref()
+                .map(|qc| qc.data.for_which.slot.is_pred(slot) && qc.data.for_which.view == view)
+                .unwrap_or(false);
         }
 
         false
@@ -150,7 +146,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         let slot = self.slot_i_lead;
         let view = self.view_i;
 
-        let mut prev_qcs: Vec<Arc<ThreshSigned<VoteData>>> = self
+        let mut prev_qcs: Vec<FinishedQC> = self
             .index
             .tips
             .iter()
@@ -193,21 +189,15 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 .map(|msg| &msg.data.qc)
                 .max_by(|a, b| a.data.compare_qc(&b.data))
                 .cloned()
-                .unwrap_or_else(|| ThreshSigned::clone(&self.index.max_1qc));
+                .unwrap_or_else(|| self.index.max_1qc.clone());
 
             (max_qc, view_messages)
         } else {
-            let prev_qcs = self
+            let prev_leader_qc = self
                 .index
-                .qc_by_view
-                .get(&(BlockType::Lead, self.id.clone(), view));
-            let prev_leader_qc = prev_qcs
-                .and_then(|qcs| {
-                    qcs.iter()
-                        .find(|qc| qc.data.z == 1 && qc.data.for_which.slot == SlotNum(slot.0 - 1))
-                })
-                .map(|qc| ThreshSigned::clone(qc))
-                .unwrap_or_else(|| ThreshSigned::clone(&self.index.max_1qc));
+                .latest_leader_1qc
+                .clone()
+                .unwrap_or_else(|| self.index.max_1qc.clone());
 
             (prev_leader_qc, vec![])
         };
@@ -223,7 +213,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         let block = Block {
             key: block_key.clone(),
-            prev: prev_qcs.iter().map(|qc| ThreshSigned::clone(qc)).collect(),
+            prev: prev_qcs,
             one: one_qc,
             data: BlockData::Lead { justification },
         };
@@ -235,5 +225,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         self.send_msg(to_send, (Message::Block(signed_block), None));
 
         self.slot_i_lead = SlotNum(self.slot_i_lead.0 + 1);
+        self.index.latest_leader_1qc = None;
     }
 }

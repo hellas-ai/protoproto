@@ -25,7 +25,7 @@ This implementation aims to be a correct and reasonably efficient representation
 1.  **State Management (`StateIndex`):** The paper describes state (`M_i`, `Q_i`) using set-theoretic definitions. For efficiency, this implementation uses indexed data structures within `StateIndex` (e.g., `BTreeMap`, `BTreeSet`). This allows for faster lookups and updates (often O(log n) or O(1)) compared to iterating over potentially large message histories.
     *   `index.blocks`: Stores received blocks, indexed by `BlockKey`.
     *   `index.qcs`: Stores formed QCs, indexed by `VoteData`.
-    *   Various helper indexes (`qc_by_slot`, `qc_by_view`, `block_pointed_by`, etc.) facilitate efficient querying.
+    *   Various helper indexes (`qc_by_slot`, `block_pointed_by`, etc.) facilitate efficient querying.
     *   `index.tips`: Tracks the current tips of the QC DAG.
     *   `index.finalized`, `index.unfinalized`, `index.unfinalized_2qc`: Track block finalization status incrementally.
 2.  **Incremental Updates:** Instead of re-computing relations or sets from the entire history, state updates (like tips, finalization, max QCs) are performed incrementally as new blocks and QCs arrive (`record_block`, `record_qc`).

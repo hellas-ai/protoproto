@@ -346,10 +346,10 @@ fn test_pending_votes_invariants() {
     };
 
     // Create a dummy threshold signature
-    let gen_qc = ThreshSigned {
+    let gen_qc = Arc::new(ThreshSigned {
         data: gen_vote_data,
         signature: hints::Signature::default(),
-    };
+    });
 
     // Add this block to the process's state using proper constructors
     let block = Signed::from_data(

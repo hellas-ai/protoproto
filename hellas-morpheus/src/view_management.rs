@@ -67,7 +67,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 Message::StartView(Arc::new(Signed::from_data(
                     StartView {
                         view: new_view,
-                        qc: ThreshSigned::clone(&self.index.max_1qc),
+                        qc: self.index.max_1qc.clone(),
                     },
                     &self.kb,
                 ))),

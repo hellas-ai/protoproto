@@ -6,7 +6,7 @@ use crate::*;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 /// Tracks votes for a particular data type and helps form quorums
 ///
 /// This is an implementation helper that tracks votes from different processes
@@ -70,6 +70,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         &mut self,
         z: u8,
         block: &BlockKey,
+        // send this vote to only this process
         target: Option<Identity>,
         to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {

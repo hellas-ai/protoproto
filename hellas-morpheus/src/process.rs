@@ -94,7 +94,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
     pub received_messages: BTreeSet<Message<Tr>>,
 
     pub genesis: Arc<Signed<Block<Tr>>>,
-    pub genesis_qc: Arc<ThreshSigned<VoteData>>,
+    pub genesis_qc: FinishedQC,
     pub ready_transactions: Vec<Tr>,
 
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
@@ -108,13 +108,13 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             data: Block {
                 key: GEN_BLOCK_KEY,
                 prev: Vec::new(),
-                one: ThreshSigned {
+                one: Arc::new(ThreshSigned {
                     data: VoteData {
                         z: 1,
                         for_which: GEN_BLOCK_KEY,
                     },
                     signature: hints::Signature::default(),
-                },
+                }),
                 data: BlockData::Genesis,
             },
             author: Identity(u32::MAX),
