@@ -490,30 +490,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     qc_data: qc.data.clone(),
                 });
             }
-
-            // Check that QC is correctly indexed in qc_index
-            let index_key = (
-                vote_data.for_which.type_,
-                vote_data
-                    .for_which
-                    .author
-                    .clone()
-                    .unwrap_or(Identity(u32::MAX)),
-                vote_data.for_which.slot,
-            );
-            if let Some(indexed_qc) = self.index.qc_by_slot.get(&index_key) {
-                if indexed_qc.data.for_which != vote_data.for_which {
-                    violations.push(InvariantViolation::QcIndexMismatch {
-                        qc_index_data: indexed_qc.data.clone(),
-                        qc_data: vote_data.clone(),
-                    });
-                }
-            } else {
-                violations.push(InvariantViolation::QcNotInQcIndex {
-                    vote_data: vote_data.clone(),
-                    qc_index: format!("{:?}", self.index.qc_by_slot),
-                });
-            }
         }
 
         // Check tips consistency using self.observes() relation

@@ -90,6 +90,9 @@ impl SlotNum {
     pub fn is_pred(&self, other: SlotNum) -> bool {
         self.0 + 1 == other.0
     }
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 #[derive(

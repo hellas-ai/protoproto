@@ -55,6 +55,9 @@ pub struct StateIndex<Tr: Transaction> {
     /// 1-QC for the leader block we produced in our previous slot
     pub latest_leader_1qc: Option<FinishedQC>,
 
+    /// z-QC for the transaction block we produced in our previous slot
+    pub latest_tr_qc: Option<FinishedQC>,
+
     /// Tracks unfinalized blocks with 2-QC
     /// Used to identify blocks that have 2-QC but are not yet finalized
     pub unfinalized_2qc: BTreeSet<VoteData>,
@@ -74,10 +77,6 @@ pub struct StateIndex<Tr: Transaction> {
     /// Maps views to sets of unfinalized leader blocks
     /// Tracks which leader blocks are not yet finalized by view
     pub unfinalized_lead_by_view: BTreeMap<ViewNum, BTreeSet<BlockKey>>,
-
-    /// Quick index to QCs by block type, author, and slot
-    /// Enables O(1) lookup of QCs
-    pub qc_by_slot: BTreeMap<(BlockType, Identity, SlotNum), FinishedQC>,
 }
 
 impl<Tr: Transaction> StateIndex<Tr> {
@@ -92,6 +91,7 @@ impl<Tr: Transaction> StateIndex<Tr> {
             max_height: (0, GEN_BLOCK_KEY),
             max_1qc: genesis_qc.clone(),
             latest_leader_1qc: None,
+            latest_tr_qc: None,
             all_1qc: BTreeSet::new(),
             tips: vec![genesis_qc.data.clone()],
             blocks: {
@@ -109,11 +109,6 @@ impl<Tr: Transaction> StateIndex<Tr> {
             unfinalized: BTreeMap::new(),
             contains_lead_by_view: BTreeMap::new(),
             unfinalized_lead_by_view: BTreeMap::new(),
-
-            qc_by_slot: BTreeMap::from([(
-                (BlockType::Genesis, Identity(u32::MAX), SlotNum(0)),
-                genesis_qc.clone(),
-            )]),
         }
     }
 }
@@ -132,22 +127,19 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // maintain the (type, author, {slot,view}) -> qc index
         if let Some(author) = &qc.data.for_which.author {
-            self.index.qc_by_slot.insert(
-                (
-                    qc.data.for_which.type_,
-                    author.clone(),
-                    qc.data.for_which.slot,
-                ),
-                qc.clone(),
-            );
-
             if author == &self.id
                 && qc.data.z == 1
                 && qc.data.for_which.type_ == BlockType::Lead
-                && qc.data.for_which.view == self.view_i
                 && qc.data.for_which.slot.is_pred(self.slot_i_lead)
             {
                 self.index.latest_leader_1qc = Some(qc.clone());
+            }
+
+            if author == &self.id
+                && qc.data.for_which.type_ == BlockType::Tr
+                && qc.data.for_which.slot.is_pred(self.slot_i_tr)
+            {
+                self.index.latest_tr_qc = Some(qc.clone());
             }
         }
 
