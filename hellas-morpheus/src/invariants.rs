@@ -561,9 +561,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 let is_marked_final = self
                     .index
                     .finalized
-                    .get(block_key)
-                    .cloned()
-                    .unwrap_or(false);
+                    .contains(block_key);
 
                 if should_be_final && !is_marked_final {
                     violations.push(InvariantViolation::BlockWithObserved2QcNotFinalized {
@@ -626,15 +624,13 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         // Check finalization consistency
-        for (key, is_finalized) in &self.index.finalized {
-            if *is_finalized {
+        for key in &self.index.finalized {
                 // If finalized, it shouldn't be in unfinalized
                 if self.index.unfinalized.contains_key(key) {
                     violations.push(InvariantViolation::BlockFinalizedButAlsoUnfinalized {
                         block: key.clone(),
                     });
                 }
-            }
         }
 
         // Check unfinalized_2qc consistency
@@ -728,9 +724,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 if self
                     .index
                     .finalized
-                    .get(block_key)
-                    .cloned()
-                    .unwrap_or(false)
+                    .contains(block_key)
                 {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
@@ -766,9 +760,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 if self
                     .index
                     .finalized
-                    .get(block_key)
-                    .cloned()
-                    .unwrap_or(false)
+                    .contains(block_key)
                 {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
@@ -803,9 +795,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 if self
                     .index
                     .finalized
-                    .get(block_key)
-                    .cloned()
-                    .unwrap_or(false)
+                    .contains(block_key)
                 {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
@@ -841,9 +831,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 if self
                     .index
                     .finalized
-                    .get(block_key)
-                    .cloned()
-                    .unwrap_or(false)
+                    .contains(block_key)
                 {
                     violations.push(InvariantViolation::PendingVotesForFinalizedBlock {
                         view: *view,
@@ -874,9 +862,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                         && !self
                             .index
                             .finalized
-                            .get(block_key)
-                            .cloned()
-                            .unwrap_or(false)
+                            .contains(block_key)
                         && self.is_eligible_for_tr_1_vote(block_key)
                         && !pending.tr_1.contains_key(block_key)
                     {
@@ -895,9 +881,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                         && !self
                             .index
                             .finalized
-                            .get(&vote_data.for_which)
-                            .cloned()
-                            .unwrap_or(false)
+                            .contains(&vote_data.for_which)
                         && self.is_eligible_for_tr_2_vote(&vote_data.for_which)
                         && !pending.tr_2.contains_key(&vote_data.for_which)
                     {

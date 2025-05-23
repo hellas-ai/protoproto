@@ -368,7 +368,7 @@ fn test_pending_votes_invariants() {
     process.record_block(&Arc::new(block));
 
     // Mark the block as finalized
-    process.index.finalized.insert(block_key.clone(), true);
+    process.index.finalized.insert(block_key.clone());
 
     // Add to pending votes
     let pending = process.pending_votes.entry(current_view).or_default();

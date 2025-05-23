@@ -60,7 +60,7 @@ pub struct StateIndex<Tr: Transaction> {
 
     /// Maps block keys to their finalization status
     /// Used to track which blocks have been finalized
-    pub finalized: BTreeMap<BlockKey, bool>,
+    pub finalized: BTreeSet<BlockKey>,
 
     /// Maps block keys to their unfinalized QCs
     /// Used to track which QCs are not yet finalized
@@ -92,11 +92,7 @@ impl<Tr: Transaction> StateIndex<Tr> {
             },
             block_pointed_by: BTreeMap::new(),
             unfinalized_2qc: BTreeSet::new(),
-            finalized: {
-                let mut map = BTreeMap::new();
-                map.insert(GEN_BLOCK_KEY, true);
-                map
-            },
+            finalized: BTreeSet::from([GEN_BLOCK_KEY]),
             unfinalized: BTreeMap::new(),
             contains_lead_by_view: BTreeMap::new(),
             unfinalized_lead_by_view: BTreeMap::new(),
@@ -237,7 +233,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             self.index.unfinalized.remove(&finalized.data.for_which);
             self.index
                 .finalized
-                .insert(finalized.data.for_which.clone(), true);
+                .insert(finalized.data.for_which.clone());
 
             // re-evaluate the pending votes for this view
             self.pending_votes
@@ -288,7 +284,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         let block_key = block.data.key.clone();
-        assert_eq!(self.index.finalized.insert(block_key.clone(), false), None);
         assert_eq!(
             self.index.blocks.insert(block_key.clone(), block.clone()),
             None
