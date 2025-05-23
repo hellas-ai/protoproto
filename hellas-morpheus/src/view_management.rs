@@ -51,13 +51,10 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Send all tips we've created to the new leader
         // "Send all tips q' of Q_i such that q'.auth = p_i to lead(v)"
         for tip in self.index.tips.clone() {
-            if tip.for_which.author == Some(self.id.clone()) {
+            if tip.data.for_which.author == Some(self.id.clone()) {
                 self.send_msg(
                     to_send,
-                    (
-                        Message::QC(self.index.qcs.get(&tip).unwrap().clone()),
-                        Some(self.lead(new_view)),
-                    ),
+                    (Message::QC(tip.clone()), Some(self.lead(new_view))),
                 );
             }
         }
@@ -97,23 +94,20 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 .flat_map(|(_, qcs)| qcs)
                 .max_by(|&qc1, &qc2| {
                     // FIXME: when the paper says maximal, does it mean unique?
-                    if self.observes(qc1.clone(), qc2) {
+                    if self.observes(qc1.data.clone(), &qc2.data) {
                         Ordering::Greater
-                    } else if self.observes(qc2.clone(), qc1) {
+                    } else if self.observes(qc2.data.clone(), &qc1.data) {
                         Ordering::Less
                     } else {
                         Ordering::Equal
                     }
                 });
 
-            if let Some(qc_data) = maximal_unfinalized {
-                if !self.complained_qcs.insert(qc_data.clone()) {
+            if let Some(qc) = maximal_unfinalized {
+                if !self.complained_qcs.insert(qc.clone()) {
                     self.send_msg(
                         to_send,
-                        (
-                            Message::QC(self.index.qcs.get(&qc_data).cloned().unwrap()),
-                            Some(self.lead(self.view_i)),
-                        ),
+                        (Message::QC(qc.clone()), Some(self.lead(self.view_i))),
                     );
                 }
             }

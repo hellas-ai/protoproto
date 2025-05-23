@@ -222,7 +222,13 @@ impl MockHarness {
         self.steps += 1;
 
         for (_, process) in self.processes.iter() {
-            tracing::info!(target: "process_state", process_id = ?process.id, time = self.time, steps = self.steps, tips = ?process.index.tips);
+            let tips = process
+                .index
+                .tips
+                .iter()
+                .map(|qc| qc.data.clone())
+                .collect::<Vec<_>>();
+            tracing::info!(target: "process_state", process_id = ?process.id, time = self.time, steps = self.steps, tips = ?tips);
         }
         made_progress
     }

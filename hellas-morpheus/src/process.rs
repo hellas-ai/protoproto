@@ -64,7 +64,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
 
     /// Tracks which QCs we've already complained about to the leader
     /// Implements "Send q to lead(view_i) if not previously sent"
-    pub complained_qcs: BTreeSet<VoteData>,
+    pub complained_qcs: BTreeSet<FinishedQC>,
 
     /// Time when this process entered the current view
     /// Used for timeout calculations (6Δ and 12Δ since entering view)
@@ -92,6 +92,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
 
     /// All messages received by this process
     pub received_messages: BTreeSet<Message<Tr>>,
+    pub qcs: BTreeSet<FinishedQC>,
 
     pub genesis: Arc<Signed<Block<Tr>>>,
     pub genesis_qc: FinishedQC,
@@ -167,7 +168,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 Message::Block(genesis_block.clone()),
                 Message::QC(genesis_qc.clone()),
             ]),
-
+            qcs: BTreeSet::from([genesis_qc.clone()]),
             genesis: genesis_block,
             genesis_qc: genesis_qc.clone(),
             ready_transactions: Vec::new(),

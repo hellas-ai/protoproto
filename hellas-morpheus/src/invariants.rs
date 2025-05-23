@@ -3,6 +3,7 @@ use crate::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::sync::Arc;
 
 /// Represents a violation of an internal state invariant
 ///
@@ -58,10 +59,10 @@ pub enum InvariantViolation {
     },
     // Tips related violations
     TipsMissingQCs {
-        missing_tips: Vec<VoteData>,
+        missing_tips: Vec<FinishedQC>,
     },
     TipsContainsExtraQCs {
-        extra_tips: Vec<VoteData>,
+        extra_tips: Vec<FinishedQC>,
     },
 
     // Finalization related violations
@@ -97,10 +98,10 @@ pub enum InvariantViolation {
 
     // Unfinalized 2QC consistency
     UnfinalizedQcHasWrongZ {
-        vote_data: VoteData,
+        vote_data: FinishedQC,
     },
     UnfinalizedQcNotInQcs {
-        vote_data: VoteData,
+        vote_data: FinishedQC,
     },
     BlockForUnfinalizedQcNotInUnfinalized {
         block: BlockKey,
@@ -294,14 +295,14 @@ impl fmt::Display for InvariantViolation {
             Self::UnfinalizedQcHasWrongZ { vote_data } => write!(
                 f,
                 "VoteData {:?} in unfinalized_2qc has z = {} instead of 2",
-                format_vote_data(vote_data, false),
-                vote_data.z
+                format_vote_data(&vote_data.data, false),
+                vote_data.data.z
             ),
 
             Self::UnfinalizedQcNotInQcs { vote_data } => write!(
                 f,
                 "VoteData {:?} in unfinalized_2qc not found in qcs",
-                format_vote_data(vote_data, false)
+                format_vote_data(&vote_data.data, false)
             ),
 
             Self::BlockForUnfinalizedQcNotInUnfinalized { block } => write!(
@@ -413,9 +414,15 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             });
         }
 
+        let qcs = self
+            .qcs
+            .iter()
+            .map(|qc| (qc.data.clone(), qc.clone()))
+            .collect::<Vec<_>>();
+
         // Reconstruct Q_i - the set of QCs
         // According to pseudocode: "Q_i stores at most one z-QC for each block"
-        let q_i_qcs: BTreeSet<&VoteData> = self.index.qcs.keys().collect();
+        let q_i_qcs: BTreeSet<&VoteData> = qcs.iter().map(|qc| &qc.0).collect();
 
         // Check block DAG consistency
         for (key, block) in &self.index.blocks {
@@ -482,7 +489,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         // Check QC consistency
-        for (vote_data, qc) in &self.index.qcs {
+        for (vote_data, qc) in &qcs {
             // Check that QC data matches index
             if &qc.data != vote_data {
                 violations.push(InvariantViolation::QcDataMismatch {
@@ -495,22 +502,22 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Check tips consistency using self.observes() relation
         // "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"
         let mut computed_tips = Vec::new();
-        for qc_data in q_i_qcs.iter() {
+        for (qc_data, qc) in &qcs {
             let is_tip = !q_i_qcs.iter().any(|qc_data2| {
                 // Is there any QC that observes this one and is not the same?
-                qc_data != qc_data2
+                qc_data != *qc_data2
                     && self.observes((*qc_data2).clone(), qc_data)
                     && !self.observes((*qc_data).clone(), qc_data2)
             });
 
             if is_tip {
-                computed_tips.push((*qc_data).clone());
+                computed_tips.push(Arc::clone(qc));
             }
         }
 
         // Check if our computed tips match the actual tips
-        let actual_tips_set: BTreeSet<VoteData> = self.index.tips.iter().cloned().collect();
-        let computed_tips_set: BTreeSet<VoteData> = computed_tips.into_iter().collect();
+        let actual_tips_set: BTreeSet<FinishedQC> = self.index.tips.iter().cloned().collect();
+        let computed_tips_set: BTreeSet<FinishedQC> = computed_tips.into_iter().collect();
 
         if actual_tips_set != computed_tips_set {
             // Find elements in computed_tips but not in actual_tips
@@ -537,16 +544,15 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Check finalization according to pseudocode definition:
         // "Process p_i regards q ∈ Q_i (and q.b) as final if there exists q' ∈ Q_i such
         // that q' ⪰ q and q is a 2-QC (for any block)."
-        for (vote_data, _) in &self.index.qcs {
+        for (vote_data, _) in &qcs {
             // Only check 2-QCs for finalization
             if vote_data.z == 2 {
                 let block_key = &vote_data.for_which;
 
                 // Check if any QC observes this 2-QC
-                let observed_by_any =
-                    self.index.qcs.keys().any(|q_data| {
-                        q_data != vote_data && self.observes(q_data.clone(), vote_data)
-                    });
+                let observed_by_any = qcs.iter().any(|(q_data, _)| {
+                    q_data != vote_data && self.observes(q_data.clone(), vote_data)
+                });
 
                 // According to pseudocode, this 2-QC should be final if observed by any other QC
                 let should_be_final = observed_by_any;
@@ -607,7 +613,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         // Check if max_1qc is actually maximal among all 1-QCs
-        for (vote_data, _) in &self.index.qcs {
+        for (vote_data, _) in &qcs {
             if vote_data.z == 1 {
                 let comparison = vote_data.compare_qc(&self.index.max_1qc.data);
                 if comparison == std::cmp::Ordering::Greater {
@@ -633,21 +639,21 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // Check unfinalized_2qc consistency
         for vote_data in &self.index.unfinalized_2qc {
-            if vote_data.z != 2 {
+            if vote_data.data.z != 2 {
                 violations.push(InvariantViolation::UnfinalizedQcHasWrongZ {
                     vote_data: vote_data.clone(),
                 });
             }
 
             // Should be in qcs
-            if !self.index.qcs.contains_key(vote_data) {
+            if !qcs.iter().any(|(qc_data, _)| qc_data == &vote_data.data) {
                 violations.push(InvariantViolation::UnfinalizedQcNotInQcs {
                     vote_data: vote_data.clone(),
                 });
             }
 
             // The block should be unfinalized
-            let block_key = &vote_data.for_which;
+            let block_key = &vote_data.data.for_which;
             if !self.index.unfinalized.contains_key(block_key) {
                 violations.push(InvariantViolation::BlockForUnfinalizedQcNotInUnfinalized {
                     block: block_key.clone(),
@@ -687,7 +693,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
         for (vote_data, &received_count) in &vote_counts {
             if received_count >= (self.n - self.f) as usize {
-                if !self.index.qcs.contains_key(vote_data) {
+                if !qcs.iter().any(|(qc_data, _)| qc_data == vote_data) {
                     violations.push(InvariantViolation::MissingQCDespiteQuorum {
                         vote_data: vote_data.clone(),
                     });
@@ -882,7 +888,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                     }
                 }
 
-                for (vote_data, _) in &self.index.qcs {
+                for (vote_data, _) in &qcs {
                     if vote_data.z == 1
                         && vote_data.for_which.type_ == BlockType::Tr
                         && vote_data.for_which.view == self.view_i

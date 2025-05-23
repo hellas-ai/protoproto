@@ -90,7 +90,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 self.record_qc(qc);
                 if self.index.max_view.0 > self.view_i {
                     self.end_view(
-                        Message::QC(self.index.qcs.get(&self.index.max_view.1).cloned().unwrap()),
+                        Message::QC(self.index.max_view.1.clone()),
                         self.index.max_view.0,
                         to_send,
                     );

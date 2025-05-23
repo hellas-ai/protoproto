@@ -54,14 +54,13 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // If there's a single tip, point to it as well
         if self.index.tips.len() == 1 {
             let tip = &self.index.tips[0];
-            let tip_qc = self.index.qcs.get(tip).unwrap();
 
             // Don't add duplicate QC
             if !prev_qcs
                 .iter()
-                .any(|qc| qc.data.for_which == tip_qc.data.for_which)
+                .any(|qc| qc.data.for_which == tip.data.for_which)
             {
-                prev_qcs.push(tip_qc.clone());
+                prev_qcs.push(tip.clone());
             }
         }
 
@@ -143,12 +142,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         let slot = self.slot_i_lead;
         let view = self.view_i;
 
-        let mut prev_qcs: Vec<FinishedQC> = self
-            .index
-            .tips
-            .iter()
-            .filter_map(|tip| self.index.qcs.get(tip).cloned())
-            .collect();
+        let mut prev_qcs: Vec<FinishedQC> = self.index.tips.clone();
 
         if !slot.is_zero() {
             if let Some(prev_qc) = self
