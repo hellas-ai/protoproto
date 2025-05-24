@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{cmp::Ordering, sync::Arc};
 
 use crate::*;
 
@@ -178,15 +178,23 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         let (one_qc, justification) = if !has_produced_lead_block {
             let view_messages = self.start_views.get(&view).cloned().unwrap_or_default();
 
-            let max_qc = view_messages
+            let max_just = view_messages
                 .iter()
                 .map(|msg| &msg.data.qc)
                 .max_by(|a, b| a.data.compare_qc(&b.data))
                 .cloned()
                 .unwrap_or_else(|| self.index.max_1qc.clone());
 
-            // FIXME: we could return max_1qc here, the max_qc just needs to weakly dominate the justification
-            (max_qc, view_messages)
+            // NOTE: max_1qc might be even bigger, help us make progress faster?
+            let maxest_qc = std::cmp::max_by(self.index.max_1qc.clone(), max_just, |a, b| {
+                a.data.compare_qc(&b.data)
+            });
+
+            debug_assert!(
+                view_messages[0].data.qc.data.compare_qc(&maxest_qc.data) != Ordering::Greater
+            );
+
+            (maxest_qc, view_messages)
         } else {
             let prev_leader_qc = self
                 .index
