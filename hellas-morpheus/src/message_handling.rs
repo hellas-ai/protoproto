@@ -167,7 +167,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 if start_view.data.qc.data.z != 1 {
                     return false;
                 }
-                self.record_qc(start_view.data.qc.clone());
                 self.start_views
                     .entry(start_view.data.view)
                     .or_insert(Vec::new())
