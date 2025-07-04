@@ -3,9 +3,13 @@ use std::{cmp::Ordering, sync::Arc};
 use crate::*;
 
 impl<Tr: Transaction> MorpheusProcess<Tr> {
-    pub fn try_produce_blocks(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
+    pub fn try_produce_blocks(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
         if self.payload_ready() {
-            self.make_tr_block(to_send);
+            self.make_tr_block(db, to_send);
         }
 
         if self.id == self.lead(self.view_i)
@@ -13,7 +17,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             && self.phase_i.get(&self.view_i).unwrap_or(&Phase::High) == &Phase::High
             && self.index.tips.len() > 1
         {
-            self.make_leader_block(to_send);
+            self.make_leader_block(db, to_send);
         }
     }
 
@@ -34,7 +38,11 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         has_transactions
     }
 
-    fn make_tr_block(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
+    fn make_tr_block(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
         let slot = self.slot_i_tr;
         let mut prev_qcs = Vec::new();
 
@@ -98,7 +106,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         self.slot_i_tr = SlotNum(self.slot_i_tr.0 + 1);
         self.index.latest_tr_qc = None;
 
-        self.send_msg(to_send, (Message::Block(signed_block.clone()), None));
+        self.send_msg(db, to_send, (Message::Block(signed_block.clone()), None));
     }
 
     fn leader_ready(&self) -> bool {
@@ -138,7 +146,11 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
     }
 
-    fn make_leader_block(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
+    fn make_leader_block(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
         let slot = self.slot_i_lead;
         let view = self.view_i;
 
@@ -225,7 +237,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         let signed_block = Arc::new(Signed::from_data(block, &self.kb));
 
-        self.send_msg(to_send, (Message::Block(signed_block), None));
+        self.send_msg(db, to_send, (Message::Block(signed_block), None));
 
         self.slot_i_lead = SlotNum(self.slot_i_lead.0 + 1);
     }

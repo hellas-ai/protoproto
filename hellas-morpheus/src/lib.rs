@@ -60,6 +60,6 @@ pub use types::*;
 pub use voting::*;
 
 pub trait Transaction:
-    Sync + Clone + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug
+    Sync + Clone + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug + 'static
 {
 }

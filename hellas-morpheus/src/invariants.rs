@@ -1,3 +1,5 @@
+use redb::ReadableTable;
+
 use crate::format::*;
 use crate::*;
 
@@ -398,7 +400,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     ///
     /// This method is intended for testing purposes to ensure protocol invariants
     /// are maintained throughout execution.
-    pub fn check_invariants(&self) -> Vec<InvariantViolation> {
+    pub fn check_invariants(&self, db: &redb::Database) -> Vec<InvariantViolation> {
         let mut violations = Vec::new();
 
         // Check view and phase consistency
@@ -665,23 +667,33 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // Count all the voting messages manually and check that a QC is present for each with quorum
         let mut vote_counts = BTreeMap::new();
-        for msg in &self.received_messages {
+        let tx = db.begin_read().unwrap();
+        let recvd_tbl = tx
+            .open_table(crate::process::received_messages_table_default::<Tr>().unwrap())
+            .unwrap();
+
+        for msg in recvd_tbl.iter().unwrap() {
             match msg {
-                Message::NewVote(vote) => {
-                    *vote_counts.entry(vote.data.clone()).or_insert(0usize) += 1;
-                    if !self
-                        .vote_tracker
-                        .votes
-                        .get(&vote.data)
-                        .unwrap()
-                        .contains_key(&vote.author)
-                    {
-                        violations.push(InvariantViolation::UntrackedVote {
-                            vote_data: ThreshPartial::clone(&vote),
-                        });
+                Ok((_, msg)) => match msg.value() {
+                    Message::NewVote(vote) => {
+                        *vote_counts.entry(vote.data.clone()).or_insert(0usize) += 1;
+                        if !self
+                            .vote_tracker
+                            .votes
+                            .get(&vote.data)
+                            .unwrap()
+                            .contains_key(&vote.author)
+                        {
+                            violations.push(InvariantViolation::UntrackedVote {
+                                vote_data: ThreshPartial::clone(&vote),
+                            });
+                        }
                     }
+                    _ => {}
+                },
+                Err(e) => {
+                    panic!("Error reading received messages: {}", e);
                 }
-                _ => {}
             }
         }
         for (vote_data, &received_count) in &vote_counts {

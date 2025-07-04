@@ -47,8 +47,7 @@ fn test_multiple_rounds_end_view() {
             .processes
             .get(&Identity(1))
             .unwrap()
-            .received_messages
-            .len(),
+            .received_messages,
         3
     );
     assert_eq!(
@@ -56,8 +55,7 @@ fn test_multiple_rounds_end_view() {
             .processes
             .get(&Identity(2))
             .unwrap()
-            .received_messages
-            .len(),
+            .received_messages,
         5
     );
     assert_eq!(
@@ -65,8 +63,7 @@ fn test_multiple_rounds_end_view() {
             .processes
             .get(&Identity(3))
             .unwrap()
-            .received_messages
-            .len(),
+            .received_messages,
         7
     );
 }

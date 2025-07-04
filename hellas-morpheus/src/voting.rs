@@ -68,6 +68,7 @@ impl<
 impl<Tr: Transaction> MorpheusProcess<Tr> {
     pub fn try_vote(
         &mut self,
+        db: &redb::Database,
         z: u8,
         block: &BlockKey,
         // send this vote to only this process
@@ -91,7 +92,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 },
                 &self.kb,
             ));
-            self.send_msg(to_send, (Message::NewVote(voted.clone()), target));
+            self.send_msg(db, to_send, (Message::NewVote(voted.clone()), target));
             true
         } else {
             false
@@ -101,6 +102,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// Returns false if the vote is a duplicate (sender already voted there)
     pub fn record_vote(
         &mut self,
+        db: &redb::Database,
         vote_data: &Arc<ThreshPartial<VoteData>>,
         to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {
@@ -143,7 +145,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                             vote_data.data.z,
                             &vote_data.data,
                         );
-                        self.send_msg(to_send, (Message::QC(quorum_formed.clone()), None));
+                        self.send_msg(db, to_send, (Message::QC(quorum_formed.clone()), None));
                     }
                     self.record_qc(quorum_formed);
                 }
@@ -161,7 +163,11 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     }
 
     /// Re-evaluate all pending votes based on current state
-    pub fn reevaluate_pending_votes(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
+    pub fn reevaluate_pending_votes(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
         // Only process votes for the current view
         let current_view = self.view_i;
 
@@ -190,6 +196,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         if contains_lead && unfinalized_lead_empty {
             // Process transaction block votes (1-votes and 2-votes)
             self.process_block_votes(
+                db,
                 1,
                 &mut pending.tr_1,
                 |this, block_key| this.is_eligible_for_tr_1_vote(block_key),
@@ -198,6 +205,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             );
 
             self.process_block_votes(
+                db,
                 2,
                 &mut pending.tr_2,
                 |this, block_key| this.is_eligible_for_tr_2_vote(block_key),
@@ -209,6 +217,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Process leader block votes if we're still in high throughput phase
         if self.phase_i.get(&current_view).unwrap_or(&Phase::High) == &Phase::High {
             self.process_block_votes(
+                db,
                 1,
                 &mut pending.lead_1,
                 |_, block_key| block_key.view == current_view,
@@ -217,6 +226,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             );
 
             self.process_block_votes(
+                db,
                 2,
                 &mut pending.lead_2,
                 |_, block_key| block_key.view == current_view,
@@ -234,6 +244,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// This handles both transaction and leader blocks for both 1-votes and 2-votes
     fn process_block_votes<F>(
         &mut self,
+        db: &redb::Database,
         vote_level: u8,
         pending_votes: &mut BTreeMap<BlockKey, bool>,
         eligibility_check: F,
@@ -246,7 +257,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         for block_key in pending_votes.keys().cloned() {
             if eligibility_check(self, &block_key) {
-                if self.try_vote(vote_level, &block_key, None, to_send) {
+                if self.try_vote(db, vote_level, &block_key, None, to_send) {
                     if block_key.type_ == BlockType::Tr && phase_transition_reason.is_some() {
                         // If we voted for a transaction block, transition to low throughput phase
                         crate::tracing_setup::protocol_transition(

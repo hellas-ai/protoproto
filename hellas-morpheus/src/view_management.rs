@@ -24,6 +24,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
     pub(crate) fn end_view(
         &mut self,
+        db: &redb::Database,
         cause: Message<Tr>,
         new_view: ViewNum,
         to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
@@ -46,19 +47,21 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // View changed, we need to re-evaluate pending votes
         self.pending_votes.entry(new_view).or_default().dirty = true;
 
-        self.send_msg(to_send, (cause, None));
+        self.send_msg(db, to_send, (cause, None));
 
         // Send all tips we've created to the new leader
         // "Send all tips q' of Q_i such that q'.auth = p_i to lead(v)"
         for tip in self.index.tips.clone() {
             if tip.data.for_which.author == Some(self.id.clone()) {
                 self.send_msg(
+                    db,
                     to_send,
                     (Message::QC(tip.clone()), Some(self.lead(new_view))),
                 );
             }
         }
         self.send_msg(
+            db,
             to_send,
             (
                 Message::StartView(Arc::new(Signed::from_data(
@@ -73,7 +76,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         );
 
         // Re-evaluate any pending voting decisions after view change
-        self.reevaluate_pending_votes(to_send);
+        self.reevaluate_pending_votes(db, to_send);
     }
 
     /// Implements the "Complain" section from Algorithm 1
@@ -83,7 +86,11 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     ///  time 6Δ since entering view view_i: Send q to lead(view_i) if not previously sent;"
     /// "If ∃q ∈ Q_i which has not been finalized for time 12Δ since entering view view_i:
     ///  Send the end-view message (view_i) signed by p_i to all processes;"
-    pub fn check_timeouts(&mut self, to_send: &mut Vec<(Message<Tr>, Option<Identity>)>) {
+    pub fn check_timeouts(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
         let time_in_view = self.current_time - self.view_entry_time;
 
         if time_in_view >= self.delta * COMPLAIN_TIMEOUT {
@@ -106,6 +113,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             if let Some(qc) = maximal_unfinalized {
                 if !self.complained_qcs.insert(qc.clone()) {
                     self.send_msg(
+                        db,
                         to_send,
                         (Message::QC(qc.clone()), Some(self.lead(self.view_i))),
                     );
@@ -116,6 +124,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Second timeout - 12Δ, send end-view message
         if time_in_view >= self.delta * END_VIEW_TIMEOUT && !self.index.unfinalized.is_empty() {
             self.send_msg(
+                db,
                 to_send,
                 (
                     Message::EndView(Arc::new(ThreshPartial::from_data(self.view_i, &self.kb))),

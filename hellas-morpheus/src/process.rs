@@ -5,14 +5,119 @@ use std::{
 
 use crate::state_tracking::{PendingVotes, StateIndex};
 use crate::*;
+use redb::{ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug)]
+pub struct ArkSerialize<T>(pub T);
+
+impl<T> redb::Value for ArkSerialize<T>
+where
+    T: Debug + CanonicalDeserialize + CanonicalSerialize,
+{
+    type SelfType<'a>
+        = T
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = Vec<u8>
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        None
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        T::deserialize_compressed(data).unwrap()
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'a,
+        Self: 'b,
+    {
+        let mut writer = Vec::new();
+        T::serialize_compressed(value, &mut writer).unwrap();
+        writer
+    }
+
+    fn type_name() -> redb::TypeName {
+        redb::TypeName::new(&format!("ArkSerialize<{}>", std::any::type_name::<T>()))
+    }
+}
+
+impl<T> redb::Key for ArkSerialize<T>
+where
+    T: Debug + CanonicalDeserialize + CanonicalSerialize + Ord,
+{
+    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
+        use redb::Value;
+        Self::from_bytes(data1).cmp(&Self::from_bytes(data2))
+    }
+}
+
+#[derive(Debug)]
+pub struct Postcard<T>(pub T);
+
+impl<T> redb::Value for Postcard<T>
+where
+    T: Debug + Serialize + for<'a> Deserialize<'a>,
+{
+    type SelfType<'a>
+        = T
+    where
+        Self: 'a;
+
+    type AsBytes<'a>
+        = Vec<u8>
+    where
+        Self: 'a;
+
+    fn fixed_width() -> Option<usize> {
+        None
+    }
+
+    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
+    where
+        Self: 'a,
+    {
+        postcard::from_bytes(data).unwrap()
+    }
+
+    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
+    where
+        Self: 'a,
+        Self: 'b,
+    {
+        postcard::to_stdvec(value).unwrap()
+    }
+
+    fn type_name() -> redb::TypeName {
+        redb::TypeName::new(&format!("Postcard<{}>", std::any::type_name::<T>()))
+    }
+}
+
+impl<T> redb::Key for Postcard<T>
+where
+    T: Debug + Serialize + for<'a> Deserialize<'a> + Ord,
+{
+    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
+        use redb::Value;
+        Self::from_bytes(data1).cmp(&Self::from_bytes(data2))
+    }
+}
 
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
 ///
 /// This struct implements the Algorithm 1 from the Morpheus pseudocode,
 /// maintaining all state required for processing messages, voting, and
 /// producing blocks according to the protocol specification.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, derive_more::Debug, Serialize, Deserialize)]
 pub struct MorpheusProcess<Tr: Transaction> {
     pub kb: KeyBook,
 
@@ -91,7 +196,13 @@ pub struct MorpheusProcess<Tr: Transaction> {
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 
     /// All messages received by this process
-    pub received_messages: BTreeSet<Message<Tr>>,
+    pub received_messages: u64,
+    pub received_messages_bloom: fastbloom::BloomFilter,
+    #[debug(skip)]
+    #[serde(default = "received_messages_table_default")]
+    #[serde(skip)]
+    pub received_messages_table: Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>>,
+
     pub qcs: BTreeSet<FinishedQC>,
 
     pub genesis: Arc<Signed<Block<Tr>>>,
@@ -101,9 +212,22 @@ pub struct MorpheusProcess<Tr: Transaction> {
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
 }
 
+pub(crate) fn received_messages_table_default<Tr: Transaction>()
+-> Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>> {
+    Some(TableDefinition::new("received_messages"))
+}
+
+const RECEIVED_MESSAGES_BLOOM_TABLE: TableDefinition<
+    'static,
+    (),
+    Postcard<fastbloom::BloomFilter>,
+> = TableDefinition::new("received_messages_bloom");
+
 impl<Tr: Transaction> MorpheusProcess<Tr> {
-    pub fn new(keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
+    pub fn new(db: &redb::Database, keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
         crate::tracing_setup::register_process(&id, n, f);
+
+        let received_messages_table = received_messages_table_default::<Tr>().unwrap();
 
         let genesis_block = Arc::new(Signed {
             data: Block {
@@ -129,6 +253,41 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             },
             signature: hints::Signature::default(),
         });
+
+        let (received_messages, received_messages_bloom) = {
+            let tx = db.begin_write().unwrap();
+            let val = {
+                let mut recvd_tbl = tx.open_table(received_messages_table).unwrap();
+                let mut bloom_tbl = tx.open_table(RECEIVED_MESSAGES_BLOOM_TABLE).unwrap();
+                let received_messages = recvd_tbl.len().unwrap();
+                if received_messages == 0 {
+                    recvd_tbl
+                        .insert(0, Message::Block(genesis_block.clone()))
+                        .unwrap();
+                    recvd_tbl
+                        .insert(1, Message::QC(genesis_qc.clone()))
+                        .unwrap();
+                    // TODO: fixed size of 16KiB should be justified
+                    // TODO: expected_items of 100_000 is tuff, should we do something fancier?
+                    let mut filter = fastbloom::BloomFilter::with_num_bits(8 * 1024 * 16)
+                        .expected_items(100_000);
+                    filter.insert(&Message::Block::<Tr>(genesis_block.clone()));
+                    filter.insert(&Message::QC::<Tr>(genesis_qc.clone()));
+                    bloom_tbl.insert((), filter.clone()).unwrap();
+                    (2, filter)
+                } else {
+                    let bloom = bloom_tbl
+                        .get(())
+                        .unwrap()
+                        .expect("missing bloom filter from already-initialized database")
+                        .value();
+                    (received_messages, bloom)
+                }
+            };
+            tx.commit().unwrap();
+
+            val
+        };
 
         MorpheusProcess {
             kb: keybook,
@@ -164,10 +323,9 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 map.insert(ViewNum(0), false);
                 map
             },
-            received_messages: BTreeSet::from([
-                Message::Block(genesis_block.clone()),
-                Message::QC(genesis_qc.clone()),
-            ]),
+            received_messages,
+            received_messages_bloom,
+            received_messages_table: Some(TableDefinition::new("received_messages")),
             qcs: BTreeSet::from([genesis_qc.clone()]),
             genesis: genesis_block,
             genesis_qc: genesis_qc.clone(),

@@ -39,7 +39,8 @@ fn test_basic_txgen() {
 
     // A freshly created process should have no invariant violations
     for process in harness.processes.values() {
-        let violations = process.check_invariants();
+        let db = harness.dbs.get(&process.id).unwrap();
+        let violations = process.check_invariants(db);
         assert!(
             violations.is_empty(),
             "New process has invariant violations: {:?}",
@@ -279,8 +280,9 @@ fn test_pending_votes_invariants() {
     let mut harness = MockHarness::create_test_setup(1);
     let process = harness.processes.get_mut(&Identity(1)).unwrap();
 
+    let db = harness.dbs.get(&process.id).unwrap();
     // Verify no invariant violations in initial state
-    let violations = process.check_invariants();
+    let violations = process.check_invariants(db);
     assert!(
         violations.is_empty(),
         "New process has invariant violations: {:?}",
@@ -306,7 +308,7 @@ fn test_pending_votes_invariants() {
     pending.dirty = true;
 
     // Check for invariant violation - should be PendingVotesBlockNotFound
-    let violations = process.check_invariants();
+    let violations = process.check_invariants(db);
     let has_block_not_found = violations.iter().any(|v| {
         if let InvariantViolation::PendingVotesBlockNotFound {
             view,
@@ -376,7 +378,7 @@ fn test_pending_votes_invariants() {
     pending.dirty = true;
 
     // Check for invariant violation - should be PendingVotesForFinalizedBlock
-    let violations = process.check_invariants();
+    let violations = process.check_invariants(db);
     let has_finalized_violation = violations.iter().any(|v| {
         if let InvariantViolation::PendingVotesForFinalizedBlock {
             view,

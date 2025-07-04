@@ -27,13 +27,13 @@ pub struct TestTransaction(pub Vec<u8>);
 impl Transaction for TestTransaction {}
 
 /// A basic simulation harness for MorpheusProcess
-#[derive(Clone)]
 pub struct MockHarness {
     /// The current logical time of the simulation
     pub time: u128,
 
     /// The processes participating in the simulation
     pub processes: BTreeMap<Identity, MorpheusProcess<TestTransaction>>,
+    pub dbs: BTreeMap<Identity, redb::Database>,
 
     /// Messages that are waiting to be delivered
     /// Each message is paired with its sender and destination (None means broadcast)
@@ -82,10 +82,19 @@ impl MockHarness {
             .map(|i| (pubkeys[i].clone(), Identity(i as u32 + 1)))
             .collect();
 
+        let dbs = (0..num_parties)
+            .map(|i| {
+                let db = redb::Builder::new()
+                    .create_with_backend(redb::backends::InMemoryBackend::new())
+                    .unwrap();
+                (Identity(i as u32 + 1), db)
+            })
+            .collect::<BTreeMap<_, _>>();
         // Create processes with different identities
         let processes = (0..num_parties)
             .map(|i| {
                 MorpheusProcess::new(
+                    dbs.get(&Identity(i as u32 + 1)).unwrap(),
                     KeyBook {
                         keys: keys.clone(),
                         identities: identities.clone(),
@@ -102,11 +111,15 @@ impl MockHarness {
             .collect();
 
         // Create a harness with these processes
-        MockHarness::new(processes, 100)
+        MockHarness::new(processes, dbs, 100)
     }
 
     /// Create a new mock harness with the given nodes
-    pub fn new(nodes: Vec<MorpheusProcess<TestTransaction>>, time_step: u128) -> Self {
+    pub fn new(
+        nodes: Vec<MorpheusProcess<TestTransaction>>,
+        dbs: BTreeMap<Identity, redb::Database>,
+        time_step: u128,
+    ) -> Self {
         let mut processes = BTreeMap::new();
 
         for mut node in nodes {
@@ -118,6 +131,7 @@ impl MockHarness {
         MockHarness {
             time: 0,
             processes,
+            dbs,
             pending_messages: VecDeque::new(),
             time_step,
             steps: 0,
@@ -138,7 +152,12 @@ impl MockHarness {
                 Some(id) => {
                     // Deliver to specific node
                     if let Some(process) = self.processes.get_mut(&id) {
-                        let result = process.process_message(message, sender.clone(), &mut to_send);
+                        let result = process.process_message(
+                            self.dbs.get(&id).unwrap(),
+                            message,
+                            sender.clone(),
+                            &mut to_send,
+                        );
 
                         if result {
                             made_progress = true;
@@ -151,8 +170,12 @@ impl MockHarness {
                         if process.id == sender {
                             continue;
                         }
-                        let result =
-                            process.process_message(message.clone(), sender.clone(), &mut to_send);
+                        let result = process.process_message(
+                            self.dbs.get(&process.id).unwrap(),
+                            message.clone(),
+                            sender.clone(),
+                            &mut to_send,
+                        );
 
                         if result {
                             made_progress = true;
@@ -179,7 +202,8 @@ impl MockHarness {
 
         for (_, process) in self.processes.iter_mut() {
             let mut to_send = Vec::new();
-            process.check_timeouts(&mut to_send);
+            let db = self.dbs.get(&process.id).unwrap();
+            process.check_timeouts(db, &mut to_send);
 
             if !to_send.is_empty() {
                 made_progress = true;
@@ -238,6 +262,7 @@ impl MockHarness {
         let mut made_progress = false;
         for (_, process) in self.processes.iter_mut() {
             let mut to_send = Vec::new();
+            let db = self.dbs.get(&process.id).unwrap();
             match self.tx_gen_policy.get(&process.id) {
                 Some(TxGenPolicy::EveryNSteps { n }) => {
                     if self.steps % n == 0 {
@@ -263,7 +288,7 @@ impl MockHarness {
                     // Do nothing
                 }
             }
-            process.try_produce_blocks(&mut to_send);
+            process.try_produce_blocks(db, &mut to_send);
             for (msg, dest) in to_send {
                 made_progress = true;
                 self.pending_messages

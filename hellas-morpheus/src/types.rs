@@ -2,6 +2,7 @@ use crate::Transaction;
 use crate::crypto::*;
 use crate::format;
 
+use ark_serialize::CompressedChecked;
 use ark_serialize::Valid;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use serde::{Deserialize, Serialize};
@@ -208,9 +209,14 @@ pub struct StartView {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum BlockData<Tr> {
+#[serde(from = "CompressedChecked<BlockData<Tr>>", into = "CompressedChecked<BlockData<Tr>>")]
+pub enum BlockData<Tr: Transaction> {
     Genesis,
     Tr {
+        #[serde(bound(
+            serialize = "Tr: Transaction",
+            deserialize = "Tr: Transaction"
+        ))]
         transactions: Vec<Tr>,
     },
     Lead {
@@ -218,7 +224,13 @@ pub enum BlockData<Tr> {
     },
 }
 
-impl<Tr: CanonicalSerialize> CanonicalSerialize for BlockData<Tr> {
+impl<Tr: Transaction> From<CompressedChecked<BlockData<Tr>>> for BlockData<Tr> {
+    fn from(c: CompressedChecked<BlockData<Tr>>) -> Self {
+        c.0
+    }
+}
+
+impl<Tr: Transaction> CanonicalSerialize for BlockData<Tr> {
     fn serialize_with_mode<W: std::io::Write>(
         &self,
         mut writer: W,
@@ -246,13 +258,13 @@ impl<Tr: CanonicalSerialize> CanonicalSerialize for BlockData<Tr> {
     }
 }
 
-impl<Tr: Sync> Valid for BlockData<Tr> {
+impl<Tr: Transaction> Valid for BlockData<Tr> {
     fn check(&self) -> Result<(), ark_serialize::SerializationError> {
         Ok(())
     }
 }
 
-impl<Tr: CanonicalDeserialize> CanonicalDeserialize for BlockData<Tr> {
+impl<Tr: Transaction> CanonicalDeserialize for BlockData<Tr> {
     fn deserialize_with_mode<R: std::io::Read>(
         mut reader: R,
         compress: ark_serialize::Compress,
@@ -288,6 +300,10 @@ pub struct Block<Tr: Transaction> {
     pub key: BlockKey,
     pub prev: Vec<FinishedQC>,
     pub one: FinishedQC,
+    #[serde(bound(
+        serialize = "Tr: Transaction",
+        deserialize = "Tr: Transaction"
+    ))]
     pub data: BlockData<Tr>,
 }
 
@@ -299,6 +315,10 @@ impl<Tr: Transaction> std::fmt::Debug for Block<Tr> {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Ord, Serialize, Deserialize)]
 pub enum Message<Tr: Transaction> {
+    #[serde(bound(
+        serialize = "Tr: Transaction",
+        deserialize = "Tr: Transaction"
+    ))]
     Block(Arc<Signed<Block<Tr>>>),
     NewVote(Arc<ThreshPartial<VoteData>>),
     QC(FinishedQC),
