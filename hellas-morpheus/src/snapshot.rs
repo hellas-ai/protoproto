@@ -30,7 +30,9 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             Err(_) => panic!("Failed to open snapshots table"),
         };
         if let Ok(Some((_, snapshot))) = snapshots.last() {
-            Some(snapshot.value())
+            let mut process = snapshot.value();
+            process.rebuild_bloom_filter(db);
+            Some(process)
         } else {
             None
         }
@@ -50,9 +52,34 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         // Find the snapshot with the exact message count
         if let Ok(Some(snapshot)) = snapshots.get(message_count) {
-            Some(snapshot.value())
+            let mut process = snapshot.value();
+            // Rebuild the bloom filter to only include messages up to this point
+            process.rebuild_bloom_filter(db);
+            Some(process)
         } else {
             None
+        }
+    }
+
+    /// Rebuild the bloom filter from the recorded events up to the current recorded_events count
+    fn rebuild_bloom_filter(&mut self, db: &redb::Database) {
+        use fastbloom::BloomFilter;
+        
+        // Clear and recreate the bloom filter
+        self.seen_messages = BloomFilter::with_num_bits(8 * 1024 * 16)
+            .seed(&0x8F3A57D2C19E4B7F0123456789ABCDEF)
+            .expected_items(100_000);
+
+        // Rebuild from recorded events up to our current point
+        let tx = db.begin_read().unwrap();
+        if let Ok(events_table) = tx.open_table(self.recorded_events_table.unwrap()) {
+            for i in 0..self.recorded_events {
+                if let Ok(Some(event)) = events_table.get(i) {
+                    if let crate::Event::ProcessMessage { ref payload, .. } = event.value() {
+                        self.seen_messages.insert(payload);
+                    }
+                }
+            }
         }
     }
 
@@ -80,7 +107,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         // Replay messages from current count to target
-        for msg_id in start_count + 1..target_message_count {
+        for msg_id in start_count..target_message_count {
             match messages_table.get(msg_id) {
                 Ok(Some(message)) => {
                     let evt = message.value();

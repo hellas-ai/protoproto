@@ -14,9 +14,14 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         if message.1.is_none() || message.1.as_ref().unwrap() == &self.id {
             // IMPORTANT: implements note from page 8:
             // In what follows, we suppose that, when a correct process sends a
-            // message to ‘all processes’, it regards that message as
+            // message to 'all processes', it regards that message as
             // immediately received by itself
-            self.process_message(db, message.0.clone(), self.id.clone(), to_send);
+            
+            // BUT: Don't process locally during replay - it will be processed
+            // when we replay the ProcessMessage event
+            if !self.replaying {
+                self.process_message(db, message.0.clone(), self.id.clone(), to_send);
+            }
         }
         to_send.push(message);
     }
@@ -29,19 +34,22 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         sender: Identity,
         to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {
-        if self.seen_messages.contains(&message) {
-            let tx = db.begin_read().unwrap();
-            let seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
-            let bytes = postcard::to_stdvec(&message).unwrap();
-            let hash = blake3::hash(&bytes);
-            if seen_tbl.get(hash.as_bytes()).unwrap().is_some() {
-                tracing::error!(
-                    target: "duplicate_message",
-                    sender = ?sender,
-                    full_message = format_message(&message, true),
-                    "Ignoring duplicate message: why did we receive it?"
-                );
-                return false;
+        // Skip duplicate detection during replay - we trust the recorded events
+        if !self.replaying {
+            if self.seen_messages.contains(&message) {
+                let tx = db.begin_read().unwrap();
+                let seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
+                let bytes = postcard::to_stdvec(&message).unwrap();
+                let hash = blake3::hash(&bytes);
+                if seen_tbl.get(hash.as_bytes()).unwrap().is_some() {
+                    tracing::error!(
+                        target: "duplicate_message",
+                        sender = ?sender,
+                        full_message = format_message(&message, true),
+                        "Ignoring duplicate message: why did we receive it?"
+                    );
+                    return false;
+                }
             }
         }
 

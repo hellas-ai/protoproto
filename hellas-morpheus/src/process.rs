@@ -245,6 +245,11 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
     /// Records an event to the event log if not replaying
     pub(crate) fn record_event(&mut self, db: &redb::Database, event: Event<Tr>) {
+        // Always update the bloom filter for ProcessMessage events
+        if let Event::ProcessMessage { ref payload, .. } = event {
+            self.seen_messages.insert(payload);
+        }
+
         if self.replaying {
             self.recorded_events += 1;
             return;
@@ -252,7 +257,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         let tx = db.begin_write().unwrap();
         if let Event::ProcessMessage { ref payload, .. } = event {
-            self.seen_messages.insert(payload);
             {
                 let mut seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
                 let bytes = postcard::to_stdvec(payload).unwrap();
@@ -265,7 +269,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             let mut tbl = tx.open_table(self.recorded_events_table.unwrap()).unwrap();
             let processed_messages = tbl.len().unwrap();
             tbl.insert(processed_messages, &event).unwrap();
-            self.recorded_events = processed_messages;
+            self.recorded_events = processed_messages + 1;
         }
 
         tx.commit().unwrap();

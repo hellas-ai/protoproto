@@ -269,29 +269,29 @@ impl MockHarness {
             match self.tx_gen_policy.get(&process.id) {
                 Some(TxGenPolicy::EveryNSteps { n }) => {
                     if self.steps % n == 0 {
-                        process
-                            .ready_transactions
-                            .push(TestTransaction(vec![1, 2, 3, 4]));
+                        let mut new_txs = process.ready_transactions.clone();
+                        new_txs.push(TestTransaction(vec![1, 2, 3, 4]));
+                        process.set_ready_transactions(db, new_txs);
                     }
                 }
                 Some(TxGenPolicy::OncePerView { prev_view }) => {
                     if process.view_i != prev_view.read().unwrap().unwrap_or(ViewNum(-1)) {
-                        process
-                            .ready_transactions
-                            .push(TestTransaction(vec![1, 2, 3, 4]));
+                        let mut new_txs = process.ready_transactions.clone();
+                        new_txs.push(TestTransaction(vec![1, 2, 3, 4]));
+                        process.set_ready_transactions(db, new_txs);
                         *prev_view.write().unwrap() = Some(process.view_i);
                     }
                 }
                 Some(TxGenPolicy::Always) => {
-                    process
-                        .ready_transactions
-                        .push(TestTransaction(vec![1, 2, 3, 4]));
+                    let mut new_txs = process.ready_transactions.clone();
+                    new_txs.push(TestTransaction(vec![1, 2, 3, 4]));
+                    process.set_ready_transactions(db, new_txs);
                 }
                 None | Some(TxGenPolicy::Never) => {
                     // Do nothing
                 }
             }
-            process.try_produce_blocks(db, &mut to_send);
+            process.try_produce_blocks_recorded(db, &mut to_send);
             for (msg, dest) in to_send {
                 made_progress = true;
                 self.pending_messages
