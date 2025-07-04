@@ -12,13 +12,7 @@ use serde::{Deserialize, Serialize};
 /// This is an implementation helper that tracks votes from different processes
 /// and determines when a quorum (n-f votes) has been reached.
 /// Used for implementing the collection of votes in the protocol.
-pub struct QuorumTrack<
-    T: Ord
-        + CanonicalSerialize
-        + CanonicalDeserialize
-        + Valid
-        + 'static,
-> {
+pub struct QuorumTrack<T: Ord + CanonicalSerialize + CanonicalDeserialize + Valid + 'static> {
     /// Maps vote data to a map of (voter identity -> signed vote)
     /// Ensures we only count one vote per process and track when we reach a quorum
     //#[serde(with = "serde_json_any_key::any_key_map")]

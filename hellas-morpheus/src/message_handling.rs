@@ -29,9 +29,12 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         sender: Identity,
         to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
     ) -> bool {
-        // Check if we've seen this message before (duplicate detection)
-        if cfg!(debug_assertions) {
-            if self.received_messages_bloom.contains(&message) {
+        if self.seen_messages.contains(&message) {
+            let tx = db.begin_read().unwrap();
+            let seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
+            let bytes = postcard::to_stdvec(&message).unwrap();
+            let hash = blake3::hash(&bytes);
+            if seen_tbl.get(hash.as_bytes()).unwrap().is_some() {
                 tracing::error!(
                     target: "duplicate_message",
                     sender = ?sender,
@@ -43,16 +46,13 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         // Record that we've received this message
-        self.received_messages_bloom.insert(&message);
-        let tx = db.begin_write().unwrap();
-        {
-            let mut tbl = tx
-                .open_table(self.received_messages_table.unwrap())
-                .unwrap();
-            tbl.insert(self.received_messages, &message).unwrap();
-            self.received_messages += 1;
-        }
-        tx.commit().unwrap();
+        self.record_event(
+            db,
+            Event::ProcessMessage {
+                sender: sender.clone(),
+                payload: message.clone(),
+            },
+        );
 
         match message {
             Message::Block(block) => {

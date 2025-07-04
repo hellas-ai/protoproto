@@ -1,4 +1,5 @@
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
+use derivative::Derivative;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -36,16 +37,18 @@ pub struct KeyBook {
     PartialOrd,
     Ord,
     Hash,
-    Debug,
     Serialize,
     Deserialize,
     CanonicalSerialize,
     CanonicalDeserialize,
+    derivative::Derivative,
 )]
+#[derivative(Debug)]
 pub struct Signed<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub data: T,
     pub author: Identity,
     // eventually: replace with some other faster signature scheme
+    #[derivative(Debug = "ignore")]
     pub signature: hints::PartialSignature,
 }
 
@@ -56,14 +59,16 @@ pub struct Signed<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     PartialOrd,
     Ord,
     Hash,
-    Debug,
     Serialize,
     Deserialize,
     CanonicalSerialize,
     CanonicalDeserialize,
+    Derivative,
 )]
+#[derivative(Debug)]
 pub struct ThreshSigned<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub data: T,
+    #[derivative(Debug = "ignore")]
     pub signature: hints::Signature,
 }
 
@@ -74,15 +79,17 @@ pub struct ThreshSigned<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     PartialOrd,
     Ord,
     Hash,
-    Debug,
     Serialize,
     Deserialize,
     CanonicalSerialize,
     CanonicalDeserialize,
+    Derivative,
 )]
+#[derivative(Debug)]
 pub struct ThreshPartial<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
     pub data: T,
     pub author: Identity,
+    #[derivative(Debug = "ignore")]
     pub signature: hints::PartialSignature,
 }
 

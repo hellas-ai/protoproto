@@ -667,13 +667,16 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         let mut vote_counts = BTreeMap::new();
         let tx = db.begin_read().unwrap();
         let recvd_tbl = tx
-            .open_table(crate::process::received_messages_table_default::<Tr>().unwrap())
+            .open_table(crate::process::recorded_events_table_default::<Tr>().unwrap())
             .unwrap();
 
-        for msg in recvd_tbl.iter().unwrap() {
+        for msg in recvd_tbl.range(0..self.recorded_events).unwrap() {
             match msg {
                 Ok((_, msg)) => match msg.value() {
-                    Message::NewVote(vote) => {
+                    Event::ProcessMessage {
+                        sender: _,
+                        payload: Message::NewVote(vote),
+                    } => {
                         *vote_counts.entry(vote.data.clone()).or_insert(0usize) += 1;
                         if !self
                             .vote_tracker

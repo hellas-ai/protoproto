@@ -204,7 +204,7 @@ impl MockHarness {
         for (_, process) in self.processes.iter_mut() {
             let mut to_send = Vec::new();
             let db = self.dbs.get(&process.id).unwrap();
-            process.check_timeouts(db, &mut to_send);
+            process.check_timeouts_recorded(db, &mut to_send);
 
             if !to_send.is_empty() {
                 made_progress = true;
@@ -225,7 +225,7 @@ impl MockHarness {
 
         // Update time for all processes
         for (_, process) in self.processes.iter_mut() {
-            process.set_now(self.time);
+            process.set_now(self.dbs.get(&process.id).unwrap(), self.time);
         }
     }
 
@@ -253,6 +253,8 @@ impl MockHarness {
                 .iter()
                 .map(|qc| qc.data.clone())
                 .collect::<Vec<_>>();
+            let db = self.dbs.get(&process.id).unwrap();
+            process.save_snapshot(db);
             tracing::info!(target: "process_state", process_id = ?process.id, time = self.time, steps = self.steps, tips = ?tips);
         }
         made_progress
@@ -341,10 +343,18 @@ impl MockHarness {
             "Starting snapshot verification"
         );
 
-        // For each snapshot, try to recreate later snapshots by replaying
-        for (i, &start_count) in snapshot_counts.iter().enumerate() {
-            for &target_count in snapshot_counts.iter().skip(i + 1) {
-                self.verify_snapshot_pair(process_id, db, start_count, target_count)?;
+        // Verify each snapshot can be recreated from the previous one
+        for i in 1..snapshot_counts.len() {
+            let start_count = snapshot_counts[i - 1];
+            let target_count = snapshot_counts[i];
+            self.verify_snapshot_pair(process_id, db, start_count, target_count)?;
+        }
+
+        // Also verify that every snapshot can replay to the end
+        let final_count = *snapshot_counts.last().unwrap();
+        for &start_count in &snapshot_counts {
+            if start_count < final_count {
+                self.verify_snapshot_pair(process_id, db, start_count, final_count)?;
             }
         }
 

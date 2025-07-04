@@ -1,8 +1,11 @@
 use ark_serialize::CanonicalSerialize;
-use hellas_morpheus::test_harness::MockHarness;
+use hellas_morpheus::snapshots_table_default;
+use hellas_morpheus::test_harness::{MockHarness, TestTransaction, TxGenPolicy};
 use hellas_morpheus::{
-    BlockKey, BlockType, Identity, Message, SlotNum, ThreshPartial, ThreshSigned, ViewNum, VoteData,
+    BlockKey, BlockType, Message, SlotNum, ThreshPartial, ThreshSigned, VoteData,
 };
+use hellas_morpheus::{Identity, MorpheusProcess, ViewNum};
+use redb::ReadableTable;
 use std::sync::Arc;
 
 #[test_log::test]
@@ -39,27 +42,15 @@ fn test_multiple_rounds_end_view() {
     // Queue should be empty after processing
     assert_eq!(harness.pending_messages.len(), 0);
     assert_eq!(
-        harness
-            .processes
-            .get(&Identity(1))
-            .unwrap()
-            .received_messages,
+        harness.processes.get(&Identity(1)).unwrap().recorded_events,
         3
     );
     assert_eq!(
-        harness
-            .processes
-            .get(&Identity(2))
-            .unwrap()
-            .received_messages,
+        harness.processes.get(&Identity(2)).unwrap().recorded_events,
         5
     );
     assert_eq!(
-        harness
-            .processes
-            .get(&Identity(3))
-            .unwrap()
-            .received_messages,
+        harness.processes.get(&Identity(3)).unwrap().recorded_events,
         7
     );
 }
@@ -231,4 +222,88 @@ fn test_snapshot_verification() {
     harness
         .verify_all_snapshots()
         .expect("Snapshot verification failed");
+}
+
+#[test_log::test]
+fn test_snapshot_replay_determinism() {
+    let mut harness = MockHarness::create_test_setup(3);
+
+    // Configure transaction generation policy
+    harness
+        .tx_gen_policy
+        .insert(Identity(1), TxGenPolicy::EveryNSteps { n: 2 });
+
+    // Run for some steps to generate various event types
+    harness.run(2);
+    for (_, process) in harness.processes.iter() {
+        let db = harness.dbs.get(&process.id).unwrap();
+        process.save_snapshot(db);
+    }
+    harness.run(3);
+
+    // Take a snapshot for process 1
+    let process1 = harness.processes.get(&Identity(1)).unwrap();
+    let db1 = harness.dbs.get(&Identity(1)).unwrap();
+    let snapshot_count = process1.save_snapshot(db1);
+
+    tracing::info!("Saved snapshot at event count: {}", snapshot_count);
+
+    // Verify all snapshots can be replayed correctly
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification should succeed");
+
+    // Additional verification: Get all snapshots and replay from early to latest
+    let tx = db1.begin_read().unwrap();
+    let snapshots_table =
+        snapshots_table_default::<TestTransaction>().expect("Should have snapshots table");
+    let snapshots = tx.open_table(snapshots_table).expect("Should open table");
+
+    let mut snapshot_counts: Vec<u64> = Vec::new();
+    for item in snapshots.iter().expect("Should iterate") {
+        let (count, _) = item.expect("Should read item");
+        snapshot_counts.push(count.value());
+    }
+    snapshot_counts.sort();
+    drop(tx);
+
+    if snapshot_counts.len() >= 2 {
+        // Load an early snapshot and replay to the latest
+        let early_count = snapshot_counts[0];
+        let latest_count = snapshot_counts[snapshot_counts.len() - 1];
+
+        let early_snapshot = MorpheusProcess::<TestTransaction>::load_snapshot_at(db1, early_count)
+            .expect("Should be able to load early snapshot");
+
+        let mut replayed = early_snapshot.clone();
+        replayed
+            .replay_messages(db1, latest_count)
+            .expect("Replay should succeed");
+
+        // The replayed state should match the latest snapshot
+        let latest_snapshot =
+            MorpheusProcess::<TestTransaction>::load_snapshot_at(db1, latest_count)
+                .expect("Should be able to load latest snapshot");
+
+        assert_eq!(
+            replayed.recorded_events, latest_snapshot.recorded_events,
+            "Recorded events count should match"
+        );
+
+        // Verify key state components match
+        assert_eq!(
+            replayed.view_i, latest_snapshot.view_i,
+            "View numbers should match"
+        );
+
+        assert_eq!(
+            replayed.current_time, latest_snapshot.current_time,
+            "Current time should match"
+        );
+
+        assert_eq!(
+            replayed.ready_transactions, latest_snapshot.ready_transactions,
+            "Ready transactions should match"
+        );
+    }
 }

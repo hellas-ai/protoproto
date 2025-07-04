@@ -6,7 +6,8 @@ const COMPLAIN_TIMEOUT: u128 = 6;
 const END_VIEW_TIMEOUT: u128 = 12;
 
 impl<Tr: Transaction> MorpheusProcess<Tr> {
-    pub fn set_now(&mut self, now: u128) {
+    pub fn set_now(&mut self, db: &redb::Database, now: u128) {
+        self.record_event(db, Event::SetNow(now));
         self.current_time = now;
     }
 

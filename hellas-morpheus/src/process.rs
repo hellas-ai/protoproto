@@ -5,7 +5,8 @@ use std::{
 
 use crate::state_tracking::{PendingVotes, StateIndex};
 use crate::*;
-use redb::{ReadableTable, ReadableTableMetadata, TableDefinition};
+use fastbloom::BloomFilter;
+use redb::{ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
@@ -16,6 +17,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, derive_more::Debug, Serialize, Deserialize, derivative::Derivative)]
 #[derivative(PartialEq)]
 pub struct MorpheusProcess<Tr: Transaction> {
+    #[debug(skip)]
     pub kb: KeyBook,
 
     #[derivative(PartialEq = "ignore")]
@@ -97,9 +99,6 @@ pub struct MorpheusProcess<Tr: Transaction> {
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 
     /// All messages received by this process
-    pub recorded_events: u64,
-    #[derivative(PartialEq = "ignore")]
-    pub recorded_events_bloom: fastbloom::BloomFilter,
     pub qcs: BTreeSet<FinishedQC>,
     #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub genesis: Arc<Signed<Block<Tr>>>,
@@ -110,29 +109,50 @@ pub struct MorpheusProcess<Tr: Transaction> {
     pub ready_transactions: Vec<Tr>,
 
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
+    #[debug(skip)]
+    pub seen_messages: BloomFilter,
+
+    pub recorded_events: u64,
+
+    #[debug(skip)]
+    #[serde(default = "recorded_events_table_default")]
+    #[serde(skip)]
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+    #[derivative(PartialEq = "ignore")]
+    pub recorded_events_table: Option<TableDefinition<'static, u64, Postcard<Event<Tr>>>>,
+
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+    #[debug(skip)]
+    #[serde(default = "snapshots_table_default")]
+    #[serde(skip)]
+    #[derivative(PartialEq = "ignore")]
+    pub snapshots_table: Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>>,
 }
 
-pub(crate) fn received_messages_table_default<Tr: Transaction>()
--> Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>> {
-    Some(TableDefinition::new("received_messages"))
+pub fn recorded_events_table_default<Tr: Transaction>()
+-> Option<TableDefinition<'static, u64, Postcard<Event<Tr>>>> {
+    Some(TableDefinition::new("recorded_events"))
 }
 
-pub(crate) fn snapshots_table_default<Tr: Transaction>()
+pub fn snapshots_table_default<Tr: Transaction>()
 -> Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>> {
     Some(TableDefinition::new("snapshots"))
 }
 
-const RECEIVED_MESSAGES_BLOOM_TABLE: TableDefinition<
-    'static,
-    (),
-    Postcard<fastbloom::BloomFilter>,
-> = TableDefinition::new("received_messages_bloom");
+pub const SEEN_MESSAGE_HASHES_TABLE: TableDefinition<'static, [u8; 32], ()> =
+    TableDefinition::new("seen_message_hashes");
 
 impl<Tr: Transaction> MorpheusProcess<Tr> {
-    pub fn new(db: &redb::Database, keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
+    pub fn new(_db: &redb::Database, keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
         crate::tracing_setup::register_process(&id, n, f);
 
-        let received_messages_table = received_messages_table_default::<Tr>().unwrap();
+        let recorded_events_table = recorded_events_table_default::<Tr>().unwrap();
+        let tx = _db.begin_write().unwrap();
+        {
+            // other code wants to assume this table exists
+            tx.open_table(recorded_events_table).unwrap();
+        }
+        tx.commit().unwrap();
 
         let genesis_block = Arc::new(Signed {
             data: Block {
@@ -159,42 +179,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             signature: hints::Signature::default(),
         });
 
-        let (received_messages, received_messages_bloom) = {
-            let tx = db.begin_write().unwrap();
-            let val = {
-                let mut recvd_tbl = tx.open_table(received_messages_table).unwrap();
-                let mut bloom_tbl = tx.open_table(RECEIVED_MESSAGES_BLOOM_TABLE).unwrap();
-                let received_messages = recvd_tbl.len().unwrap();
-                if received_messages == 0 {
-                    recvd_tbl
-                        .insert(0, Message::Block(genesis_block.clone()))
-                        .unwrap();
-                    recvd_tbl
-                        .insert(1, Message::QC(genesis_qc.clone()))
-                        .unwrap();
-                    // TODO: fixed size of 16KiB should be justified
-                    // TODO: expected_items of 100_000 is tuff, should we do something fancier?
-                    let mut filter = fastbloom::BloomFilter::with_num_bits(8 * 1024 * 16)
-                        .expected_items(100_000);
-                    filter.insert(&Message::Block::<Tr>(genesis_block.clone()));
-                    filter.insert(&Message::QC::<Tr>(genesis_qc.clone()));
-                    bloom_tbl.insert((), filter.clone()).unwrap();
-                    (2, filter)
-                } else {
-                    let bloom = bloom_tbl
-                        .get(())
-                        .unwrap()
-                        .expect("missing bloom filter from already-initialized database")
-                        .value();
-                    (received_messages, bloom)
-                }
-            };
-            tx.commit().unwrap();
-
-            val
-        };
-
-        MorpheusProcess {
+        let mut p = MorpheusProcess {
             kb: keybook,
             replaying: false,
             id,
@@ -229,15 +214,86 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 map.insert(ViewNum(0), false);
                 map
             },
-            received_messages,
-            received_messages_bloom,
-            received_messages_table: Some(received_messages_table),
+            recorded_events: 0,
+            recorded_events_table: Some(recorded_events_table),
             snapshots_table: snapshots_table_default::<Tr>(),
             qcs: BTreeSet::from([genesis_qc.clone()]),
-            genesis: genesis_block,
+            genesis: genesis_block.clone(),
             genesis_qc: genesis_qc.clone(),
             ready_transactions: Vec::new(),
             pending_votes: BTreeMap::new(),
+            seen_messages: BloomFilter::with_num_bits(8 * 1024 * 16)
+                .seed(&0x8F3A57D2C19E4B7F0123456789ABCDEF)
+                .expected_items(100_000),
+        };
+        p.record_event(
+            _db,
+            Event::ProcessMessage {
+                sender: Identity(u32::MAX),
+                payload: Message::Block(genesis_block.clone()),
+            },
+        );
+        p.record_event(
+            _db,
+            Event::ProcessMessage {
+                sender: Identity(u32::MAX),
+                payload: Message::QC(genesis_qc.clone()),
+            },
+        );
+        p
+    }
+
+    /// Records an event to the event log if not replaying
+    pub(crate) fn record_event(&mut self, db: &redb::Database, event: Event<Tr>) {
+        if self.replaying {
+            self.recorded_events += 1;
+            return;
         }
+
+        let tx = db.begin_write().unwrap();
+        if let Event::ProcessMessage { ref payload, .. } = event {
+            self.seen_messages.insert(payload);
+            {
+                let mut seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
+                let bytes = postcard::to_stdvec(payload).unwrap();
+                let hash = blake3::hash(&bytes);
+                seen_tbl.insert(hash.as_bytes(), ()).unwrap();
+            }
+        }
+
+        {
+            let mut tbl = tx.open_table(self.recorded_events_table.unwrap()).unwrap();
+            let processed_messages = tbl.len().unwrap();
+            tbl.insert(processed_messages, &event).unwrap();
+            self.recorded_events = processed_messages;
+        }
+
+        tx.commit().unwrap();
+    }
+
+    /// Sets ready transactions and records the event
+    pub fn set_ready_transactions(&mut self, db: &redb::Database, transactions: Vec<Tr>) {
+        self.record_event(db, Event::SetReadyTransactions(transactions.clone()));
+        self.ready_transactions = transactions;
+    }
+
+    /// Wrapper that records check_timeouts event
+    pub fn check_timeouts_recorded(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
+        self.record_event(db, Event::CheckTimeouts);
+        self.check_timeouts(db, to_send);
+    }
+
+    /// Wrapper that records try_produce_blocks event
+    pub fn try_produce_blocks_recorded(
+        &mut self,
+        db: &redb::Database,
+        to_send: &mut Vec<(Message<Tr>, Option<Identity>)>,
+    ) {
+        self.record_event(db, Event::CheckProduceBlocks);
+        self.try_produce_blocks(db, to_send);
     }
 }

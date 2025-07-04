@@ -26,10 +26,7 @@ pub struct StateIndex<Tr: Transaction> {
 
     /// Maps block keys to signed blocks (part of M_i in pseudocode)
     /// Implements part of "the set of all received messages"
-    #[serde(bound(
-        serialize = "Tr: Transaction",
-        deserialize = "Tr: Transaction"
-    ))]
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub blocks: BTreeMap<BlockKey, Arc<Signed<Block<Tr>>>>,
 
     // === Performance optimization indexes ===

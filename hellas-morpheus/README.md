@@ -49,7 +49,7 @@ This implementation aims to be a correct and reasonably efficient representation
 | Paper Concept                 | Implementation Element(s)                                     | Notes                                                                 |
 | :---------------------------- | :------------------------------------------------------------ | :-------------------------------------------------------------------- |
 | Process `p_i`                 | `MorpheusProcess` struct                                      | Holds all state and logic for a single process.                       |
-| Message set `M_i`             | Partially represented by `index.blocks`, `index.qcs`, etc.    | Not stored explicitly; state updated incrementally. `received_messages` tracks unique message hashes for duplicate detection. |
+| Message set `M_i`             | Partially represented by `index.blocks`, `index.qcs`, etc.    | Not stored explicitly; state updated incrementally. `recorded_events` tracks unique message hashes for duplicate detection. |
 | QC set `Q_i`                  | `index.qcs`, `index.all_1qc`, `index.unfinalized_2qc`         | Stored and indexed efficiently.                                       |
 | `view_i`, `slot_i(x)`         | `view_i`, `slot_i_lead`, `slot_i_tr` fields                   | Direct mapping.                                                       |
 | `voted_i(z, x, s, p_j)`       | `voted_i: BTreeSet<(u8, BlockType, SlotNum, Identity)>`       | Tracks votes cast by this process.                                    |

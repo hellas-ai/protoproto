@@ -209,14 +209,14 @@ pub struct StartView {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(from = "CompressedChecked<BlockData<Tr>>", into = "CompressedChecked<BlockData<Tr>>")]
+#[serde(
+    from = "CompressedChecked<BlockData<Tr>>",
+    into = "CompressedChecked<BlockData<Tr>>"
+)]
 pub enum BlockData<Tr: Transaction> {
     Genesis,
     Tr {
-        #[serde(bound(
-            serialize = "Tr: Transaction",
-            deserialize = "Tr: Transaction"
-        ))]
+        #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
         transactions: Vec<Tr>,
     },
     Lead {
@@ -300,10 +300,7 @@ pub struct Block<Tr: Transaction> {
     pub key: BlockKey,
     pub prev: Vec<FinishedQC>,
     pub one: FinishedQC,
-    #[serde(bound(
-        serialize = "Tr: Transaction",
-        deserialize = "Tr: Transaction"
-    ))]
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub data: BlockData<Tr>,
 }
 
@@ -315,10 +312,7 @@ impl<Tr: Transaction> std::fmt::Debug for Block<Tr> {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Ord, Serialize, Deserialize)]
 pub enum Message<Tr: Transaction> {
-    #[serde(bound(
-        serialize = "Tr: Transaction",
-        deserialize = "Tr: Transaction"
-    ))]
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     Block(Arc<Signed<Block<Tr>>>),
     NewVote(Arc<ThreshPartial<VoteData>>),
     QC(FinishedQC),
@@ -337,4 +331,18 @@ impl<Tr: Transaction> std::fmt::Debug for Message<Tr> {
 pub enum Phase {
     High = 0,
     Low = 1,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Ord, Serialize, Deserialize, Debug)]
+pub enum Event<Tr: Transaction> {
+    ProcessMessage {
+        sender: Identity,
+        #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+        payload: Message<Tr>,
+    },
+    SetNow(u128),
+    #[serde(with = "ark_serialize::vec_compressed_checked")]
+    SetReadyTransactions(Vec<Tr>),
+    CheckTimeouts,
+    CheckProduceBlocks,
 }

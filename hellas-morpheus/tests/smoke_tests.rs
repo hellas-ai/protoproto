@@ -137,7 +137,9 @@ fn test_basic_txgen() {
         26
     );
 
-    harness.verify_all_snapshots().expect("Snapshot verification failed");
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification failed");
 }
 
 #[test_log::test]
@@ -168,7 +170,9 @@ fn test_basic_integration() {
         assert_eq!(process.current_time, 1000);
     }
 
-    harness.verify_all_snapshots().expect("Snapshot verification failed");
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification failed");
 }
 
 #[test_log::test]
@@ -202,7 +206,9 @@ fn test_directed_message_flow() {
         assert_eq!(process.current_time, 100);
     }
 
-    harness.verify_all_snapshots().expect("Snapshot verification failed");
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification failed");
 }
 
 #[test_log::test]
@@ -250,7 +256,9 @@ fn test_basic_process_interaction() {
     // Message queue should be empty after processing
     assert_eq!(harness.pending_messages.len(), 0);
 
-    harness.verify_all_snapshots().expect("Snapshot verification failed");
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification failed");
 }
 
 #[test_log::test]
@@ -279,7 +287,9 @@ fn test_broadcast_message() {
     // After processing, the message queue should be empty
     assert_eq!(harness.pending_messages.len(), 0);
 
-    harness.verify_all_snapshots().expect("Snapshot verification failed");
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification failed");
 }
 
 #[test_log::test]
