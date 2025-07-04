@@ -17,13 +17,11 @@ pub struct QuorumTrack<
         + CanonicalSerialize
         + CanonicalDeserialize
         + Valid
-        + Serialize
-        + for<'d> Deserialize<'d>
         + 'static,
 > {
     /// Maps vote data to a map of (voter identity -> signed vote)
     /// Ensures we only count one vote per process and track when we reach a quorum
-    #[serde(with = "serde_json_any_key::any_key_map")]
+    //#[serde(with = "serde_json_any_key::any_key_map")]
     pub votes: BTreeMap<T, BTreeMap<Identity, Arc<ThreshPartial<T>>>>,
 }
 

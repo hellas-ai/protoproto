@@ -221,3 +221,14 @@ fn test_step_sequence() {
     // Note: We don't make assertions about the queue size as it depends
     // on the internal implementation of process_message and processing behavior
 }
+
+#[test]
+fn test_snapshot_verification() {
+    let mut harness = MockHarness::create_test_setup(4);
+
+    harness.run(50);
+
+    harness
+        .verify_all_snapshots()
+        .expect("Snapshot verification failed");
+}

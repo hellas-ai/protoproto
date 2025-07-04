@@ -14,6 +14,7 @@ use std::{
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::test_rng;
+use redb::ReadableTable;
 
 use serde::{Deserialize, Serialize};
 
@@ -307,6 +308,133 @@ impl MockHarness {
         }
 
         made_progress
+    }
+
+    /// Verify that all snapshots can be recreated by replaying from previous snapshots
+    /// This ensures the protocol is deterministic - the same sequence of messages
+    /// should always produce the same state regardless of which snapshot we start from
+    pub fn verify_all_snapshots(&self) -> Result<(), String> {
+        for (process_id, db) in &self.dbs {
+            self.verify_snapshots_for_process(process_id, db)?;
+        }
+        Ok(())
+    }
+
+    /// Verify snapshots for a single process
+    fn verify_snapshots_for_process(
+        &self,
+        process_id: &Identity,
+        db: &redb::Database,
+    ) -> Result<(), String> {
+        // Get all snapshot message counts for this process
+        let snapshot_counts = self.get_snapshot_counts(db)?;
+
+        if snapshot_counts.len() < 2 {
+            // Need at least 2 snapshots to do verification
+            return Ok(());
+        }
+
+        tracing::info!(
+            target: "snapshot_verification",
+            process_id = ?process_id,
+            snapshot_count = snapshot_counts.len(),
+            "Starting snapshot verification"
+        );
+
+        // For each snapshot, try to recreate later snapshots by replaying
+        for (i, &start_count) in snapshot_counts.iter().enumerate() {
+            for &target_count in snapshot_counts.iter().skip(i + 1) {
+                self.verify_snapshot_pair(process_id, db, start_count, target_count)?;
+            }
+        }
+
+        tracing::info!(
+            target: "snapshot_verification",
+            process_id = ?process_id,
+            "All snapshots verified successfully"
+        );
+
+        Ok(())
+    }
+
+    /// Verify that a target snapshot can be recreated by replaying from a start snapshot
+    fn verify_snapshot_pair(
+        &self,
+        process_id: &Identity,
+        db: &redb::Database,
+        start_count: u64,
+        target_count: u64,
+    ) -> Result<(), String> {
+        // Load the start snapshot
+        let mut recreated = MorpheusProcess::<TestTransaction>::load_snapshot_at(db, start_count)
+            .ok_or_else(|| {
+            format!("Failed to load snapshot at message count {}", start_count)
+        })?;
+
+        // Replay messages from start to target
+        recreated.replay_messages(db, target_count)?;
+
+        // Load the expected target snapshot
+        let expected = MorpheusProcess::<TestTransaction>::load_snapshot_at(db, target_count)
+            .ok_or_else(|| format!("Failed to load snapshot at message count {}", target_count))?;
+
+        // Compare the recreated state with the saved snapshot
+        if recreated != expected {
+            tracing::error!(
+                target: "snapshot_verification_failed",
+                process_id = ?process_id,
+                start_count = start_count,
+                target_count = target_count,
+                recreated_state = ?recreated,
+                expected_state = ?expected,
+                "Snapshot verification failed: recreated state does not match expected state"
+            );
+            return Err(format!(
+                "Snapshot verification failed for process {}: snapshot at message {} does not match when replayed from message {}",
+                process_id.0, target_count, start_count
+            ));
+        }
+
+        tracing::debug!(
+            target: "snapshot_verification",
+            process_id = ?process_id,
+            start_count = start_count,
+            target_count = target_count,
+            "Successfully verified snapshot pair"
+        );
+
+        Ok(())
+    }
+
+    /// Get all snapshot message counts from the database
+    fn get_snapshot_counts(&self, db: &redb::Database) -> Result<Vec<u64>, String> {
+        let tx = db
+            .begin_read()
+            .map_err(|e| format!("Failed to begin read transaction: {}", e))?;
+        let snapshots_table = snapshots_table_default::<TestTransaction>()
+            .ok_or("Failed to get snapshots table definition")?;
+
+        // Try to open the snapshots table - it might not exist if no snapshots have been saved yet
+        let snapshots = match tx.open_table(snapshots_table) {
+            Ok(table) => table,
+            Err(redb::TableError::TableDoesNotExist(_)) => {
+                // No snapshots have been saved yet, return empty list
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(format!("Failed to open snapshots table: {}", e)),
+        };
+
+        let mut counts = Vec::new();
+        for item in snapshots
+            .iter()
+            .map_err(|e| format!("Failed to iterate snapshots: {}", e))?
+        {
+            let (count, _) = item.map_err(|e| format!("Failed to read snapshot item: {}", e))?;
+            counts.push(count.value());
+        }
+
+        counts.sort();
+        Ok(counts)
     }
 
     /// Add a message to the pending queue

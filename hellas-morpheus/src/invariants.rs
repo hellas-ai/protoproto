@@ -1,5 +1,3 @@
-use redb::ReadableTable;
-
 use crate::format::*;
 use crate::*;
 

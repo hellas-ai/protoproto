@@ -8,110 +8,6 @@ use crate::*;
 use redb::{ReadableTable, ReadableTableMetadata, TableDefinition};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
-pub struct ArkSerialize<T>(pub T);
-
-impl<T> redb::Value for ArkSerialize<T>
-where
-    T: Debug + CanonicalDeserialize + CanonicalSerialize,
-{
-    type SelfType<'a>
-        = T
-    where
-        Self: 'a;
-
-    type AsBytes<'a>
-        = Vec<u8>
-    where
-        Self: 'a;
-
-    fn fixed_width() -> Option<usize> {
-        None
-    }
-
-    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
-    where
-        Self: 'a,
-    {
-        T::deserialize_compressed(data).unwrap()
-    }
-
-    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
-    where
-        Self: 'a,
-        Self: 'b,
-    {
-        let mut writer = Vec::new();
-        T::serialize_compressed(value, &mut writer).unwrap();
-        writer
-    }
-
-    fn type_name() -> redb::TypeName {
-        redb::TypeName::new(&format!("ArkSerialize<{}>", std::any::type_name::<T>()))
-    }
-}
-
-impl<T> redb::Key for ArkSerialize<T>
-where
-    T: Debug + CanonicalDeserialize + CanonicalSerialize + Ord,
-{
-    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
-        use redb::Value;
-        Self::from_bytes(data1).cmp(&Self::from_bytes(data2))
-    }
-}
-
-#[derive(Debug)]
-pub struct Postcard<T>(pub T);
-
-impl<T> redb::Value for Postcard<T>
-where
-    T: Debug + Serialize + for<'a> Deserialize<'a>,
-{
-    type SelfType<'a>
-        = T
-    where
-        Self: 'a;
-
-    type AsBytes<'a>
-        = Vec<u8>
-    where
-        Self: 'a;
-
-    fn fixed_width() -> Option<usize> {
-        None
-    }
-
-    fn from_bytes<'a>(data: &'a [u8]) -> Self::SelfType<'a>
-    where
-        Self: 'a,
-    {
-        postcard::from_bytes(data).unwrap()
-    }
-
-    fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
-    where
-        Self: 'a,
-        Self: 'b,
-    {
-        postcard::to_stdvec(value).unwrap()
-    }
-
-    fn type_name() -> redb::TypeName {
-        redb::TypeName::new(&format!("Postcard<{}>", std::any::type_name::<T>()))
-    }
-}
-
-impl<T> redb::Key for Postcard<T>
-where
-    T: Debug + Serialize + for<'a> Deserialize<'a> + Ord,
-{
-    fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
-        use redb::Value;
-        Self::from_bytes(data1).cmp(&Self::from_bytes(data2))
-    }
-}
-
 /// MorpheusProcess represents a single process (p_i) in the Morpheus protocol
 ///
 /// This struct implements the Algorithm 1 from the Morpheus pseudocode,
@@ -121,6 +17,9 @@ where
 #[derivative(PartialEq)]
 pub struct MorpheusProcess<Tr: Transaction> {
     pub kb: KeyBook,
+
+    #[derivative(PartialEq = "ignore")]
+    pub replaying: bool,
 
     /// Identity of this process (equivalent to p_i in the pseudocode)
     pub id: Identity,
@@ -147,7 +46,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
 
     /// Tracks the phase within each view (phase_i(v) in pseudocode)
     /// "Initially 0" for each view, represents high throughput (0) or low throughput (1) phase
-    #[serde(with = "serde_json_any_key::any_key_map")]
+    //#[serde(with = "serde_json_any_key::any_key_map")]
     pub phase_i: BTreeMap<ViewNum, Phase>,
 
     /// Total number of processes in the system
@@ -186,7 +85,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
 
     /// Tracks view change messages
     /// Used to collect view v messages with 1-QCs sent to the leader
-    #[serde(with = "serde_json_any_key::any_key_map")]
+    //#[serde(with = "serde_json_any_key::any_key_map")]
     pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
     #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
@@ -194,25 +93,13 @@ pub struct MorpheusProcess<Tr: Transaction> {
 
     /// Tracks whether we've produced a leader block in each view
     /// Used for leader logic to avoid producing multiple leader blocks in same view
-    #[serde(with = "serde_json_any_key::any_key_map")]
+    //#[serde(with = "serde_json_any_key::any_key_map")]
     pub produced_lead_in_view: BTreeMap<ViewNum, bool>,
 
     /// All messages received by this process
-    pub received_messages: u64,
-    pub received_messages_bloom: fastbloom::BloomFilter,
-    #[debug(skip)]
-    #[serde(default = "received_messages_table_default")]
-    #[serde(skip)]
-    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+    pub recorded_events: u64,
     #[derivative(PartialEq = "ignore")]
-    pub received_messages_table: Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>>,
-    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
-    #[debug(skip)]
-    #[serde(default = "snapshots_table_default")]
-    #[serde(skip)]
-    #[derivative(PartialEq = "ignore")]
-    pub snapshots_table: Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>>,
-
+    pub recorded_events_bloom: fastbloom::BloomFilter,
     pub qcs: BTreeSet<FinishedQC>,
     #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub genesis: Arc<Signed<Block<Tr>>>,
@@ -309,6 +196,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         MorpheusProcess {
             kb: keybook,
+            replaying: false,
             id,
             view_i: ViewNum(0),
             slot_i_lead: SlotNum(0),
