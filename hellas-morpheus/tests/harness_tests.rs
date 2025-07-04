@@ -1,8 +1,7 @@
 use ark_serialize::CanonicalSerialize;
 use hellas_morpheus::test_harness::MockHarness;
 use hellas_morpheus::{
-    BlockKey, BlockType, Identity, Message, SlotNum, ThreshPartial,
-    ThreshSigned, ViewNum, VoteData,
+    BlockKey, BlockType, Identity, Message, SlotNum, ThreshPartial, ThreshSigned, ViewNum, VoteData,
 };
 use std::sync::Arc;
 

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::*;
 
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PendingVotes {
     pub tr_1: BTreeMap<BlockKey, bool>,
     pub tr_2: BTreeMap<BlockKey, bool>,
@@ -18,7 +18,7 @@ pub struct PendingVotes {
 }
 
 /// Tracks all structural state
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateIndex<Tr: Transaction> {
     /// Stores the current tips of the block DAG
     /// "The tips of Q_i are those q ∈ Q_i such that there does not exist q' ∈ Q_i with q' ≻ q"

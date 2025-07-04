@@ -6,7 +6,7 @@ use crate::*;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 /// Tracks votes for a particular data type and helps form quorums
 ///
 /// This is an implementation helper that tracks votes from different processes

@@ -117,7 +117,8 @@ where
 /// This struct implements the Algorithm 1 from the Morpheus pseudocode,
 /// maintaining all state required for processing messages, voting, and
 /// producing blocks according to the protocol specification.
-#[derive(Clone, derive_more::Debug, Serialize, Deserialize)]
+#[derive(Clone, derive_more::Debug, Serialize, Deserialize, derivative::Derivative)]
+#[derivative(PartialEq)]
 pub struct MorpheusProcess<Tr: Transaction> {
     pub kb: KeyBook,
 
@@ -203,11 +204,13 @@ pub struct MorpheusProcess<Tr: Transaction> {
     #[serde(default = "received_messages_table_default")]
     #[serde(skip)]
     #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+    #[derivative(PartialEq = "ignore")]
     pub received_messages_table: Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>>,
     #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     #[debug(skip)]
     #[serde(default = "snapshots_table_default")]
     #[serde(skip)]
+    #[derivative(PartialEq = "ignore")]
     pub snapshots_table: Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>>,
 
     pub qcs: BTreeSet<FinishedQC>,

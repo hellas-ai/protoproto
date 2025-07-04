@@ -333,7 +333,7 @@ impl<Tr: Transaction> std::fmt::Debug for Message<Tr> {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Phase {
     High = 0,
     Low = 1,
