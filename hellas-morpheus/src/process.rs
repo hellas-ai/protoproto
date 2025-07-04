@@ -111,6 +111,8 @@ pub struct MorpheusProcess<Tr: Transaction> {
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
     #[debug(skip)]
     pub seen_messages: BloomFilter,
+    #[debug(skip)]
+    pub seen_message_hashes: BTreeSet<[u8; 32]>,
 
     pub recorded_events: u64,
 
@@ -138,9 +140,6 @@ pub fn snapshots_table_default<Tr: Transaction>()
 -> Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>> {
     Some(TableDefinition::new("snapshots"))
 }
-
-pub const SEEN_MESSAGE_HASHES_TABLE: TableDefinition<'static, [u8; 32], ()> =
-    TableDefinition::new("seen_message_hashes");
 
 impl<Tr: Transaction> MorpheusProcess<Tr> {
     pub fn new(_db: &redb::Database, keybook: KeyBook, id: Identity, n: u32, f: u32) -> Self {
@@ -225,6 +224,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             seen_messages: BloomFilter::with_num_bits(8 * 1024 * 16)
                 .seed(&0x8F3A57D2C19E4B7F0123456789ABCDEF)
                 .expected_items(100_000),
+            seen_message_hashes: BTreeSet::new(),
         };
         p.record_event(
             _db,
@@ -245,9 +245,11 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
     /// Records an event to the event log if not replaying
     pub(crate) fn record_event(&mut self, db: &redb::Database, event: Event<Tr>) {
-        // Always update the bloom filter for ProcessMessage events
         if let Event::ProcessMessage { ref payload, .. } = event {
             self.seen_messages.insert(payload);
+            let bytes = postcard::to_stdvec(payload).unwrap();
+            let hash = blake3::hash(&bytes);
+            self.seen_message_hashes.insert(*hash.as_bytes());
         }
 
         if self.replaying {
@@ -256,15 +258,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         }
 
         let tx = db.begin_write().unwrap();
-        if let Event::ProcessMessage { ref payload, .. } = event {
-            {
-                let mut seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
-                let bytes = postcard::to_stdvec(payload).unwrap();
-                let hash = blake3::hash(&bytes);
-                seen_tbl.insert(hash.as_bytes(), ()).unwrap();
-            }
-        }
-
         {
             let mut tbl = tx.open_table(self.recorded_events_table.unwrap()).unwrap();
             let processed_messages = tbl.len().unwrap();

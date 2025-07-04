@@ -16,7 +16,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             // In what follows, we suppose that, when a correct process sends a
             // message to 'all processes', it regards that message as
             // immediately received by itself
-            
+
             // BUT: Don't process locally during replay - it will be processed
             // when we replay the ProcessMessage event
             if !self.replaying {
@@ -37,11 +37,9 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Skip duplicate detection during replay - we trust the recorded events
         if !self.replaying {
             if self.seen_messages.contains(&message) {
-                let tx = db.begin_read().unwrap();
-                let seen_tbl = tx.open_table(SEEN_MESSAGE_HASHES_TABLE).unwrap();
                 let bytes = postcard::to_stdvec(&message).unwrap();
                 let hash = blake3::hash(&bytes);
-                if seen_tbl.get(hash.as_bytes()).unwrap().is_some() {
+                if self.seen_message_hashes.contains(hash.as_bytes()) {
                     tracing::error!(
                         target: "duplicate_message",
                         sender = ?sender,
