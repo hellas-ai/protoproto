@@ -39,6 +39,7 @@ mod crypto;
 mod invariants;
 mod message_handling;
 mod process;
+mod snapshot;
 mod state_tracking;
 mod types;
 mod view_management;

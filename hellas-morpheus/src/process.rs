@@ -188,6 +188,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
     #[serde(with = "serde_json_any_key::any_key_map")]
     pub start_views: BTreeMap<ViewNum, Vec<Arc<Signed<StartView>>>>,
 
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub index: StateIndex<Tr>,
 
     /// Tracks whether we've produced a leader block in each view
@@ -201,12 +202,21 @@ pub struct MorpheusProcess<Tr: Transaction> {
     #[debug(skip)]
     #[serde(default = "received_messages_table_default")]
     #[serde(skip)]
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub received_messages_table: Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>>,
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+    #[debug(skip)]
+    #[serde(default = "snapshots_table_default")]
+    #[serde(skip)]
+    pub snapshots_table: Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>>,
 
     pub qcs: BTreeSet<FinishedQC>,
-
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub genesis: Arc<Signed<Block<Tr>>>,
     pub genesis_qc: FinishedQC,
+
+    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
+    #[serde(with = "ark_serialize::vec_compressed_checked")]
     pub ready_transactions: Vec<Tr>,
 
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
@@ -215,6 +225,11 @@ pub struct MorpheusProcess<Tr: Transaction> {
 pub(crate) fn received_messages_table_default<Tr: Transaction>()
 -> Option<TableDefinition<'static, u64, Postcard<Message<Tr>>>> {
     Some(TableDefinition::new("received_messages"))
+}
+
+pub(crate) fn snapshots_table_default<Tr: Transaction>()
+-> Option<TableDefinition<'static, u64, Postcard<MorpheusProcess<Tr>>>> {
+    Some(TableDefinition::new("snapshots"))
 }
 
 const RECEIVED_MESSAGES_BLOOM_TABLE: TableDefinition<
@@ -325,7 +340,8 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             },
             received_messages,
             received_messages_bloom,
-            received_messages_table: Some(TableDefinition::new("received_messages")),
+            received_messages_table: Some(received_messages_table),
+            snapshots_table: snapshots_table_default::<Tr>(),
             qcs: BTreeSet::from([genesis_qc.clone()]),
             genesis: genesis_block,
             genesis_qc: genesis_qc.clone(),
