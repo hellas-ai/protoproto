@@ -45,6 +45,7 @@ mod state_tracking;
 mod types;
 mod view_management;
 mod voting;
+mod config;
 
 pub mod format;
 pub mod test_harness;
@@ -53,7 +54,6 @@ pub mod tracing_setup;
 use std::{fmt::Debug, hash::Hash};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
-use serde::{Deserialize, Serialize};
 
 pub use block_validation::BlockValidationError;
 pub use crypto::*;

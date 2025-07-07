@@ -9,6 +9,7 @@ redb = "2.6"
 fastbloom = { version = "0.12", features = ["serde", "rand"] }
 blake3 = "1.8"
 ron = "0.10"
+toml = "0.8"
 
 derivative = "2.2"
 tracing = "0.1"
