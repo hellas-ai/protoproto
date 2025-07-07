@@ -354,7 +354,7 @@ impl InvariantChecker {
     fn check_snapshot_consistency<Tr: Transaction, B: BulkStore<Tr>, S: SnapshotStore>(
         &self,
         bulk_store: &B,
-        snapshot_store: &S,
+        _snapshot_store: &S,
         consensus_state: &ConsensusState,
         violations: &mut Vec<StorageInvariant>,
     ) {

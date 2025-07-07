@@ -308,7 +308,7 @@ impl<Tr: Transaction> ActionProcessor<Tr> {
         start_view: &Arc<Signed<StartView>>,
         _state: &dyn ProcessState<Tr>,
     ) -> Vec<Effect<Tr>> {
-        let mut effects = Vec::new();
+        let effects = Vec::new();
 
         // Validate signature
         if !start_view.valid_signature(&self.kb) {
@@ -480,10 +480,9 @@ impl<Tr: Transaction> ActionProcessor<Tr> {
         // Create a temporary wrapper to validate blocks
         struct ValidationContext<'a> {
             kb: &'a KeyBook,
-            n: u32,
-            f: u32,
+            _n: u32,
+            _f: u32,
             genesis_qc: &'a FinishedQC,
-            id: &'a Identity,
         }
 
         impl<'a> ValidationContext<'a> {
@@ -530,10 +529,9 @@ impl<Tr: Transaction> ActionProcessor<Tr> {
 
         let context = ValidationContext {
             kb: &self.kb,
-            n: self.n,
-            f: self.f,
+            _n: self.n,
+            _f: self.f,
             genesis_qc: state.genesis_qc(),
-            id: &self.id,
         };
 
         match context.block_valid(block) {
@@ -542,11 +540,7 @@ impl<Tr: Transaction> ActionProcessor<Tr> {
         }
     }
 
-    fn form_qc(&self, vote_data: &VoteData, state: &dyn ProcessState<Tr>) -> FinishedQC {
-        // Get all votes for this vote data
-        let votes = state.get_votes_for(vote_data);
-        self.form_qc_from_votes(vote_data, &votes)
-    }
+
 
     fn form_qc_from_votes(
         &self,

@@ -219,7 +219,6 @@ pub fn block_valid<Tr: Transaction>(
     n: u32,
     f: u32,
     genesis_qc: &FinishedQC,
-    _id: &Identity,
     signed_block: &Signed<Block<Tr>>,
 ) -> Result<(), BlockValidationError> {
     let block = &signed_block.data;

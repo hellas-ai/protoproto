@@ -5,11 +5,9 @@
 
 mod common;
 
-use hellas_morpheus::storage::*;
 use hellas_morpheus::test_harness::TestTransaction;
 use hellas_morpheus::*;
 use redb::Database;
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 /// Create a test database
@@ -44,7 +42,7 @@ fn create_test_vote(voter: Identity, vote_data: VoteData) -> Arc<ThreshPartial<V
 #[test]
 fn test_bulk_store_basic_operations() {
     let db = create_test_db();
-    let mut store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut store = RedbBulkStore::new(db.clone()).unwrap();
 
     // Test block storage
     let block = common::create_test_block(1, 1, 1);
@@ -83,7 +81,7 @@ fn test_bulk_store_basic_operations() {
 #[test]
 fn test_view_indexing() {
     let db = create_test_db();
-    let mut store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut store = RedbBulkStore::new(db.clone()).unwrap();
 
     // Add multiple blocks in the same view
     let view = ViewNum(5);
@@ -119,7 +117,7 @@ fn test_view_indexing() {
 #[test]
 fn test_snapshot_store_basic_operations() {
     let db = create_test_db();
-    let mut store = snapshot::RedbSnapshotStore::new(db.clone()).unwrap();
+    let mut store = RedbSnapshotStore::new(db.clone()).unwrap();
 
     // Create a mock consensus state
     let state = ConsensusState {
@@ -159,7 +157,7 @@ fn test_snapshot_store_basic_operations() {
 #[test]
 fn test_view_cache_operations() {
     let db = create_test_db();
-    let bulk_store = Arc::new(bulk::RedbBulkStore::<TestTransaction>::new(db.clone()).unwrap());
+    let bulk_store = Arc::new(RedbBulkStore::<TestTransaction>::new(db.clone()).unwrap());
     let mut cache = ViewCache::new(ViewNum(1));
 
     // Test block caching
@@ -207,7 +205,7 @@ fn test_view_cache_operations() {
 #[test]
 fn test_lightweight_dag_index() {
     let db = create_test_db();
-    let mut bulk_store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut bulk_store = RedbBulkStore::new(db.clone()).unwrap();
     let mut dag = LightweightDAGIndex::new();
 
     // Add blocks and update DAG
@@ -260,8 +258,8 @@ fn test_lightweight_dag_index() {
 #[test]
 fn test_storage_consistency() {
     let db = create_test_db();
-    let mut bulk_store = bulk::RedbBulkStore::new(db.clone()).unwrap();
-    let mut snapshot_store = snapshot::RedbSnapshotStore::new(db.clone()).unwrap();
+    let mut bulk_store = RedbBulkStore::new(db.clone()).unwrap();
+    let mut snapshot_store = RedbSnapshotStore::new(db.clone()).unwrap();
 
     // Build up some state
     let mut blocks = vec![];
@@ -315,7 +313,7 @@ fn test_storage_consistency() {
 #[test]
 fn test_storage_error_handling() {
     let db = create_test_db();
-    let store = bulk::RedbBulkStore::<TestTransaction>::new(db.clone()).unwrap();
+    let store = RedbBulkStore::<TestTransaction>::new(db.clone()).unwrap();
 
     // Test retrieval of non-existent items
     let fake_block_ref = BlockRef {
@@ -357,7 +355,7 @@ fn test_storage_error_handling() {
 #[test]
 fn test_storage_idempotency() {
     let db = create_test_db();
-    let mut store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut store = RedbBulkStore::new(db.clone()).unwrap();
 
     // Test that appending the same block multiple times is idempotent
     let block = common::create_test_block(1, 1, 1);
@@ -386,7 +384,7 @@ fn test_storage_idempotency() {
 #[test]
 fn test_snapshot_pruning() {
     let db = create_test_db();
-    let mut store = snapshot::RedbSnapshotStore::new(db.clone()).unwrap();
+    let mut store = RedbSnapshotStore::new(db.clone()).unwrap();
 
     // Create multiple snapshots
     for i in 0..10 {

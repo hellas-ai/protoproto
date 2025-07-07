@@ -6,9 +6,9 @@
 //! - Time advancement
 //! - Transaction generation policies
 
-use hellas_morpheus::storage::{bulk::RedbBulkStore, snapshot::RedbSnapshotStore};
 use hellas_morpheus::test_harness::{MockHarness, TestTransaction, TxGenPolicy};
 use hellas_morpheus::*;
+use hellas_morpheus::{RedbBulkStore, RedbSnapshotStore};
 use std::sync::Arc;
 
 /// Helper function to create a test harness with default storage

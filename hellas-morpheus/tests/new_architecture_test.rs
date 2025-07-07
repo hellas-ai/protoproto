@@ -1,8 +1,8 @@
 //! Test demonstrating the new storage architecture
 
 use ark_std::test_rng;
-use hellas_morpheus::storage::{
-    bulk::RedbBulkStore, snapshot::RedbSnapshotStore, InvariantCheckConfig,
+use hellas_morpheus::{
+    RedbBulkStore, RedbSnapshotStore, InvariantCheckConfig,
 };
 use hellas_morpheus::test_harness::{MockHarness, TestTransaction};
 use hellas_morpheus::*;

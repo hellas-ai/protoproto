@@ -9,8 +9,7 @@ mod common;
 
 use ark_serialize::CanonicalSerialize;
 use common::*;
-use hellas_morpheus::snapshots_table_default;
-use hellas_morpheus::storage::{bulk::RedbBulkStore, snapshot::RedbSnapshotStore};
+use hellas_morpheus::{RedbBulkStore, RedbSnapshotStore, default_snapshots_table};
 use hellas_morpheus::test_harness::{MockHarness, TestTransaction, TxGenPolicy};
 use hellas_morpheus::{
     BlockKey, BlockType, Message, SlotNum, ThreshPartial, ThreshSigned, VoteData,
@@ -267,7 +266,7 @@ fn test_snapshot_replay_determinism() {
     // Additional verification: Get all snapshots and replay from early to latest
     let tx = db1.begin_read().unwrap();
     let snapshots_table =
-        snapshots_table_default::<TestTransaction>().expect("Should have snapshots table");
+        default_snapshots_table::<TestTransaction>().expect("Should have snapshots table");
     let snapshots = tx.open_table(snapshots_table).expect("Should open table");
 
     let mut snapshot_counts: Vec<u64> = Vec::new();

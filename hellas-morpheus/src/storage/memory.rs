@@ -193,7 +193,7 @@ impl LightweightDAGIndex {
     pub fn update_relationships<Tr: Transaction, S: BulkStore<Tr>>(
         &mut self,
         block: &Block<Tr>,
-        bulk_store: &S,
+        _bulk_store: &S,
     ) -> Result<(), String> {
         let block_key = block.key.clone();
 

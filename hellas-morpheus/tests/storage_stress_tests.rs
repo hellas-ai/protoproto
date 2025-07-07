@@ -5,8 +5,7 @@
 
 mod common;
 
-use hellas_morpheus::storage::BulkStore;
-use hellas_morpheus::storage::*;
+use hellas_morpheus::*;
 use hellas_morpheus::test_harness::TestTransaction;
 use hellas_morpheus::*;
 use redb::Database;
@@ -71,7 +70,7 @@ fn generate_block(
 #[test]
 fn test_bulk_store_high_volume() {
     let db = create_test_db();
-    let mut store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut store = RedbBulkStore::new(db.clone()).unwrap();
 
     let start = Instant::now();
 
@@ -172,7 +171,7 @@ fn test_view_cache_eviction_under_load() {
 #[test]
 fn test_snapshot_store_many_snapshots() {
     let db = create_test_db();
-    let mut store = snapshot::RedbSnapshotStore::new(db.clone()).unwrap();
+    let mut store = RedbSnapshotStore::new(db.clone()).unwrap();
 
     let start = Instant::now();
 
@@ -273,8 +272,8 @@ fn test_snapshot_store_many_snapshots() {
 fn test_concurrent_access_simulation() {
     // This test simulates concurrent access patterns
     let db = create_test_db();
-    let mut bulk_store = bulk::RedbBulkStore::new(db.clone()).unwrap();
-    let mut snapshot_store = snapshot::RedbSnapshotStore::new(db.clone()).unwrap();
+    let mut bulk_store = RedbBulkStore::new(db.clone()).unwrap();
+    let mut snapshot_store = RedbSnapshotStore::new(db.clone()).unwrap();
     let mut cache = ViewCache::new(ViewNum(0));
 
     // Simulate a running protocol with mixed operations
@@ -397,7 +396,7 @@ fn test_concurrent_access_simulation() {
 #[test]
 fn test_large_block_handling() {
     let db = create_test_db();
-    let mut store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut store = RedbBulkStore::new(db.clone()).unwrap();
 
     // Create a block with many large transactions
     let mut transactions = Vec::new();
@@ -455,7 +454,7 @@ fn test_large_block_handling() {
 fn test_memory_efficiency() {
     // Test that the storage system efficiently manages memory
     let db = create_test_db();
-    let mut bulk_store = bulk::RedbBulkStore::new(db.clone()).unwrap();
+    let mut bulk_store = RedbBulkStore::new(db.clone()).unwrap();
     let mut cache = ViewCache::new(ViewNum(0));
 
     // Generate and store many blocks

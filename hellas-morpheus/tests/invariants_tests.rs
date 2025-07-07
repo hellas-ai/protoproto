@@ -6,10 +6,13 @@
 mod common;
 
 use common::*;
-use hellas_morpheus::storage::{bulk::RedbBulkStore, snapshot::RedbSnapshotStore, ConsensusState};
-use hellas_morpheus::storage::{InvariantCheckConfig, InvariantChecker, StorageInvariant};
 use hellas_morpheus::test_harness::TestTransaction;
 use hellas_morpheus::*;
+use hellas_morpheus::{
+    ConsensusState, InvariantCheckConfig, InvariantChecker, RedbBulkStore, RedbSnapshotStore,
+    StorageInvariant,
+};
+use im::HashMap;
 use std::sync::Arc;
 
 #[test]
