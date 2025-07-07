@@ -6,9 +6,9 @@ use ark_serialize::CanonicalDeserialize;
 use ark_serialize::CanonicalSerialize;
 use ark_serialize::Valid;
 
-use crate::Transaction;
 use crate::crypto::*;
 use crate::types::*;
+use crate::Transaction;
 
 /// Format a BlockType in a concise way
 pub fn format_block_type(block_type: &BlockType) -> String {
@@ -255,7 +255,7 @@ pub fn format_message<Tr: Transaction>(message: &Message<Tr>, verbose: bool) -> 
             if verbose {
                 format!(
                     "EndView({})",
-                    format_thresh_partial(view, |v| format_view_num(v), true)
+                    format_thresh_partial(view, format_view_num, true)
                 )
             } else {
                 format!(
@@ -269,7 +269,7 @@ pub fn format_message<Tr: Transaction>(message: &Message<Tr>, verbose: bool) -> 
             if verbose {
                 format!(
                     "EndViewCert({})",
-                    format_thresh_signed(cert, |v| format_view_num(v), true)
+                    format_thresh_signed(cert, format_view_num, true)
                 )
             } else {
                 format!("EndViewCert({})", format_view_num(&cert.data))

@@ -63,7 +63,7 @@ impl ViewIndex {
     pub fn has_unfinalized_leaders(&self, view: ViewNum) -> bool {
         self.unfinalized_lead_by_view
             .get(&view)
-            .map_or(false, |set| !set.is_empty())
+            .is_some_and(|set| !set.is_empty())
     }
 
     /// Gets all unfinalized leader blocks for a view
@@ -73,4 +73,4 @@ impl ViewIndex {
             .map(|set| set.iter().cloned().collect())
             .unwrap_or_default()
     }
-} 
+}

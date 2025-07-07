@@ -27,24 +27,12 @@
 //! - `test_harness.rs`: Testing framework for the protocol
 //! - `tracing_setup.rs`: Structured logging with tracing-rs
 
-mod actions;
-mod block_producer;
-mod block_validation;
-mod crypto;
-mod dag_index;
-mod effects;
-mod event_log;
-mod process;
-mod processor;
-mod qc_index;
-mod serialization;
-mod state_tracking;
-mod timeout_manager;
-mod types;
-mod view_index;
-mod view_manager;
-mod vote_manager;
 mod config;
+mod crypto;
+mod logic;
+mod process;
+mod storage;
+mod types;
 
 pub mod format;
 pub mod test_harness;
@@ -54,17 +42,26 @@ use std::{fmt::Debug, hash::Hash};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 
-pub use actions::Action;
-pub use block_validation::BlockValidationError;
 pub use crypto::*;
-pub use effects::Effect;
-pub use event_log::{EventLog, LogEntry, default_snapshots_table as snapshots_table_default};
+pub use logic::*;
 pub use process::*;
-pub use state_tracking::{PendingVotes, StateIndex};
+pub use storage::*;
 pub use types::*;
-pub use processor::{ActionProcessor, ProcessState};
 
 pub trait Transaction:
-    Sync + Clone + Default + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug + serde::Serialize + for<'de> serde::Deserialize<'de> + 'static
+    Send
+    + Sync
+    + Clone
+    + Default
+    + Eq
+    + Ord
+    + Hash
+    + Valid
+    + CanonicalDeserialize
+    + CanonicalSerialize
+    + Debug
+    + serde::Serialize
+    + for<'de> serde::Deserialize<'de>
+    + 'static
 {
 }

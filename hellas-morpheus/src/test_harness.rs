@@ -18,23 +18,42 @@ use redb::ReadableTable;
 
 use serde::{Deserialize, Serialize};
 
+use crate::storage::{BulkStore, InvariantCheckConfig, SnapshotStore};
 use crate::*;
 
 #[derive(
-    Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, CanonicalDeserialize, CanonicalSerialize, serde::Serialize, serde::Deserialize, Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Hash,
+    CanonicalDeserialize,
+    CanonicalSerialize,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
 )]
-pub struct TestTransaction(pub Vec<u8>);
+pub struct TestTransaction {
+    pub id: u64,
+    pub data: Vec<u8>,
+}
 
 impl Transaction for TestTransaction {}
 
-/// A basic simulation harness for MorpheusProcess
-pub struct MockHarness {
+/// A basic simulation harness for MorpheusProcess with the new storage architecture
+pub struct MockHarness<B, S>
+where
+    B: BulkStore<TestTransaction> + Clone,
+    S: SnapshotStore + Clone,
+{
     /// The current logical time of the simulation
     pub time: u128,
 
     /// The processes participating in the simulation
-    pub processes: BTreeMap<Identity, MorpheusProcess<TestTransaction>>,
-    pub dbs: BTreeMap<Identity, redb::Database>,
+    pub processes: BTreeMap<Identity, MorpheusProcess<TestTransaction, B, S>>,
+    pub dbs: BTreeMap<Identity, Arc<redb::Database>>,
 
     /// Messages that are waiting to be delivered
     /// Each message is paired with its sender and destination (None means broadcast)
@@ -47,6 +66,7 @@ pub struct MockHarness {
 
     /// Policy for generating transactions
     pub tx_gen_policy: BTreeMap<Identity, TxGenPolicy>,
+    pub tx_id_ctr: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,8 +81,17 @@ pub enum TxGenPolicy {
     Never,
 }
 
-impl MockHarness {
-    pub fn create_test_setup(num_parties: usize) -> MockHarness {
+impl<B, S> MockHarness<B, S>
+where
+    B: BulkStore<TestTransaction> + Clone,
+    S: SnapshotStore + Clone,
+{
+    pub fn create_test_setup(
+        num_parties: usize,
+        create_bulk_store: impl Fn(&redb::Database) -> B,
+        create_snapshot_store: impl Fn(&redb::Database) -> S,
+        invariant_config: Option<InvariantCheckConfig>,
+    ) -> MockHarness<B, S> {
         let domain_max = (1 + num_parties).next_power_of_two();
         let gd = hints::GlobalData::new(domain_max, &mut test_rng()).unwrap();
         let privs = vec![hints::SecretKey::random(&mut test_rng()); domain_max - 1];
@@ -85,17 +114,24 @@ impl MockHarness {
 
         let dbs = (0..num_parties)
             .map(|i| {
-                let db = redb::Builder::new()
-                    .create_with_backend(redb::backends::InMemoryBackend::new())
-                    .unwrap();
+                let db = Arc::new(
+                    redb::Builder::new()
+                        .create_with_backend(redb::backends::InMemoryBackend::new())
+                        .unwrap(),
+                );
                 (Identity(i as u32 + 1), db)
             })
             .collect::<BTreeMap<_, _>>();
+
         // Create processes with different identities
         let processes = (0..num_parties)
             .map(|i| {
+                let db = dbs.get(&Identity(i as u32 + 1)).unwrap();
+                let bulk_store = create_bulk_store(db);
+                let snapshot_store = create_snapshot_store(db);
+
                 MorpheusProcess::new(
-                    dbs.get(&Identity(i as u32 + 1)).unwrap(),
+                    db,
                     KeyBook {
                         keys: keys.clone(),
                         identities: identities.clone(),
@@ -107,7 +143,11 @@ impl MockHarness {
                     Identity(i as u32 + 1),
                     num_parties as u32,
                     (num_parties as u32 - 1) / 3,
+                    bulk_store,
+                    snapshot_store,
+                    invariant_config.clone(),
                 )
+                .unwrap()
             })
             .collect();
 
@@ -117,8 +157,8 @@ impl MockHarness {
 
     /// Create a new mock harness with the given nodes
     pub fn new(
-        nodes: Vec<MorpheusProcess<TestTransaction>>,
-        dbs: BTreeMap<Identity, redb::Database>,
+        nodes: Vec<MorpheusProcess<TestTransaction, B, S>>,
+        dbs: BTreeMap<Identity, Arc<redb::Database>>,
         time_step: u128,
     ) -> Self {
         let mut processes = BTreeMap::new();
@@ -135,6 +175,7 @@ impl MockHarness {
             pending_messages: VecDeque::new(),
             time_step,
             steps: 0,
+            tx_id_ctr: 1,
             tx_gen_policy: BTreeMap::new(),
         }
     }
@@ -151,19 +192,25 @@ impl MockHarness {
                 Some(id) => {
                     // Deliver to specific node
                     if let Some(process) = self.processes.get_mut(&id) {
-                        let messages = process.handle_action(
-                            self.dbs.get(&id).unwrap(),
-                            Action::ProcessMessage {
-                                sender: sender.clone(),
-                                payload: message,
-                            },
-                        );
+                        let messages = process
+                            .handle_action(
+                                self.dbs.get(&id).unwrap(),
+                                Action::ProcessMessage {
+                                    sender: sender.clone(),
+                                    payload: message,
+                                },
+                            )
+                            .unwrap_or_else(|e| {
+                                tracing::error!("Error handling message: {}", e);
+                                vec![]
+                            });
 
                         if !messages.is_empty() {
                             made_progress = true;
                             next_round.extend(
-                                messages.into_iter()
-                                    .map(|(msg, dst)| (msg, id.clone(), dst))
+                                messages
+                                    .into_iter()
+                                    .map(|(msg, dst)| (msg, id.clone(), dst)),
                             );
                         }
                     }
@@ -174,19 +221,25 @@ impl MockHarness {
                         if process.id == sender {
                             continue;
                         }
-                        let messages = process.handle_action(
-                            self.dbs.get(&process.id).unwrap(),
-                            Action::ProcessMessage {
-                                sender: sender.clone(),
-                                payload: message.clone(),
-                            },
-                        );
+                        let messages = process
+                            .handle_action(
+                                self.dbs.get(&process.id).unwrap(),
+                                Action::ProcessMessage {
+                                    sender: sender.clone(),
+                                    payload: message.clone(),
+                                },
+                            )
+                            .unwrap_or_else(|e| {
+                                tracing::error!("Error handling message: {}", e);
+                                vec![]
+                            });
 
                         if !messages.is_empty() {
                             made_progress = true;
                             next_round.extend(
-                                messages.into_iter()
-                                    .map(|(msg, dst)| (msg, process.id.clone(), dst))
+                                messages
+                                    .into_iter()
+                                    .map(|(msg, dst)| (msg, process.id.clone(), dst)),
                             );
                         }
                     }
@@ -205,7 +258,12 @@ impl MockHarness {
 
         for (_, process) in self.processes.iter_mut() {
             let db = self.dbs.get(&process.id).unwrap();
-            let messages = process.handle_action(db, Action::CheckTimeouts);
+            let messages = process
+                .handle_action(db, Action::CheckTimeouts)
+                .unwrap_or_else(|e| {
+                    tracing::error!("Error checking timeouts: {}", e);
+                    vec![]
+                });
 
             if !messages.is_empty() {
                 made_progress = true;
@@ -226,7 +284,15 @@ impl MockHarness {
 
         // Update time for all processes
         for (_, process) in self.processes.iter_mut() {
-            process.handle_action(self.dbs.get(&process.id).unwrap(), Action::SetTime(self.time));
+            process
+                .handle_action(
+                    self.dbs.get(&process.id).unwrap(),
+                    Action::SetTime(self.time),
+                )
+                .unwrap_or_else(|e| {
+                    tracing::error!("Error setting time: {}", e);
+                    vec![]
+                });
         }
     }
 
@@ -249,11 +315,9 @@ impl MockHarness {
 
         for (_, process) in self.processes.iter() {
             let tips = process
-                .index
-                .dag
-                .tips
+                .tips_refs
                 .iter()
-                .map(|qc| qc.data.clone())
+                .map(|qc_ref| &qc_ref.vote_data)
                 .collect::<Vec<_>>();
             let db = self.dbs.get(&process.id).unwrap();
             let _snapshot_id = process.event_log.save_snapshot(db, process).unwrap();
@@ -268,34 +332,66 @@ impl MockHarness {
         for (_, process) in self.processes.iter_mut() {
             let db = self.dbs.get(&process.id).unwrap();
             let current_view = process.view_manager.current_view();
-            
+
             match self.tx_gen_policy.get(&process.id) {
                 Some(TxGenPolicy::EveryNSteps { n }) => {
                     if self.steps % n == 0 {
                         let mut new_txs = process.block_producer.ready_transactions.clone();
-                        new_txs.push(TestTransaction(vec![1, 2, 3, 4]));
-                        process.handle_action(db, Action::SetReadyTransactions(new_txs));
+                        new_txs.push(TestTransaction {
+                            id: self.tx_id_ctr,
+                            data: vec![1, 2, 3, 4],
+                        });
+                        self.tx_id_ctr += 1;
+                        process
+                            .handle_action(db, Action::SetReadyTransactions(new_txs))
+                            .unwrap_or_else(|e| {
+                                tracing::error!("Error setting transactions: {}", e);
+                                vec![]
+                            });
                     }
                 }
                 Some(TxGenPolicy::OncePerView { prev_view }) => {
                     if current_view != prev_view.read().unwrap().unwrap_or(ViewNum(-1)) {
                         let mut new_txs = process.block_producer.ready_transactions.clone();
-                        new_txs.push(TestTransaction(vec![1, 2, 3, 4]));
-                        process.handle_action(db, Action::SetReadyTransactions(new_txs));
+                        new_txs.push(TestTransaction {
+                            id: self.tx_id_ctr,
+                            data: vec![1, 2, 3, 4],
+                        });
+                        self.tx_id_ctr += 1;
+                        process
+                            .handle_action(db, Action::SetReadyTransactions(new_txs))
+                            .unwrap_or_else(|e| {
+                                tracing::error!("Error setting transactions: {}", e);
+                                vec![]
+                            });
                         *prev_view.write().unwrap() = Some(current_view);
                     }
                 }
                 Some(TxGenPolicy::Always) => {
                     let mut new_txs = process.block_producer.ready_transactions.clone();
-                    new_txs.push(TestTransaction(vec![1, 2, 3, 4]));
-                    process.handle_action(db, Action::SetReadyTransactions(new_txs));
+                    new_txs.push(TestTransaction {
+                        id: self.tx_id_ctr,
+                        data: vec![1, 2, 3, 4],
+                    });
+                    self.tx_id_ctr += 1;
+                    process
+                        .handle_action(db, Action::SetReadyTransactions(new_txs))
+                        .unwrap_or_else(|e| {
+                            tracing::error!("Error setting transactions: {}", e);
+                            vec![]
+                        });
                 }
                 None | Some(TxGenPolicy::Never) => {
                     // Do nothing
                 }
             }
-            
-            let messages = process.handle_action(db, Action::CheckProduceBlocks);
+
+            let messages = process
+                .handle_action(db, Action::CheckProduceBlocks)
+                .unwrap_or_else(|e| {
+                    tracing::error!("Error producing blocks: {}", e);
+                    vec![]
+                });
             if !messages.is_empty() {
                 made_progress = true;
                 for (msg, dest) in messages {
@@ -382,30 +478,61 @@ impl MockHarness {
         target_count: u64,
     ) -> Result<(), String> {
         // Get the initial process state
-        let original_process = self.processes.get(process_id)
+        let original_process = self
+            .processes
+            .get(process_id)
             .ok_or_else(|| format!("Process {} not found", process_id.0))?;
 
         // Load the start snapshot
-        let (_, mut recreated) = original_process.event_log.load_snapshot_before(db, start_count + 1)
+        let (_, mut recreated) = original_process
+            .event_log
+            .load_snapshot_before(
+                db,
+                start_count + 1,
+                original_process.bulk_store.clone(),
+                original_process.snapshot_store.clone(),
+                original_process
+                    .invariant_checker
+                    .as_ref()
+                    .map(|c| c.config.clone())
+                    .or(Some(InvariantCheckConfig::default())),
+            )
             .map_err(|e| format!("Failed to load snapshot before {}: {}", start_count + 1, e))?
             .ok_or_else(|| format!("No snapshot found before count {}", start_count + 1))?;
 
         // Collect entries to replay - only up to target_count
         let mut entries_to_replay = Vec::new();
-        recreated.event_log.replay_entries_from(db, start_count, |index, entry| {
-            if index < target_count {
-                entries_to_replay.push(entry);
-            }
-            Ok(())
-        }).map_err(|e| format!("Failed to collect entries: {}", e))?;
+        recreated
+            .event_log
+            .replay_entries_from(db, start_count, |index, entry| {
+                if index < target_count {
+                    entries_to_replay.push(entry);
+                }
+                Ok(())
+            })
+            .map_err(|e| format!("Failed to collect entries: {}", e))?;
 
         // Now replay the collected entries
         for entry in entries_to_replay {
-            recreated.handle_action(db, entry.action);
+            recreated
+                .handle_action(db, entry.action)
+                .map_err(|e| format!("Failed to replay action: {}", e))?;
         }
 
         // Load the expected target snapshot
-        let (_, expected) = original_process.event_log.load_snapshot_before(db, target_count + 1)
+        let (_, expected) = original_process
+            .event_log
+            .load_snapshot_before(
+                db,
+                target_count + 1,
+                original_process.bulk_store.clone(),
+                original_process.snapshot_store.clone(),
+                original_process
+                    .invariant_checker
+                    .as_ref()
+                    .map(|c| c.config.clone())
+                    .or(Some(InvariantCheckConfig::default())),
+            )
             .map_err(|e| format!("Failed to load snapshot before {}: {}", target_count + 1, e))?
             .ok_or_else(|| format!("No snapshot found before count {}", target_count + 1))?;
 
@@ -415,8 +542,8 @@ impl MockHarness {
             || recreated.n != expected.n
             || recreated.f != expected.f
             || recreated.view_manager.current_view() != expected.view_manager.current_view()
-            || recreated.index.dag.blocks.len() != expected.index.dag.blocks.len()
-            || recreated.index.qc_index.qcs.len() != expected.index.qc_index.qcs.len()
+            || recreated.finalized_blocks.len() != expected.finalized_blocks.len()
+            || recreated.tips_refs.len() != expected.tips_refs.len()
         {
             tracing::error!(
                 target: "snapshot_verification_failed",
@@ -425,10 +552,10 @@ impl MockHarness {
                 target_count = target_count,
                 recreated_view = ?recreated.view_manager.current_view(),
                 expected_view = ?expected.view_manager.current_view(),
-                recreated_blocks = recreated.index.dag.blocks.len(),
-                expected_blocks = expected.index.dag.blocks.len(),
-                recreated_qcs = recreated.index.qc_index.qcs.len(),
-                expected_qcs = expected.index.qc_index.qcs.len(),
+                recreated_finalized = recreated.finalized_blocks.len(),
+                expected_finalized = expected.finalized_blocks.len(),
+                recreated_tips = recreated.tips_refs.len(),
+                expected_tips = expected.tips_refs.len(),
                 "Snapshot verification failed: recreated state does not match expected state"
             );
             return Err(format!(

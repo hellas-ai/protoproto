@@ -1,11 +1,12 @@
-use crate::Transaction;
 use crate::crypto::*;
 use crate::format;
+use crate::Transaction;
 
 use ark_serialize::CompressedChecked;
 use ark_serialize::Valid;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Display};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -66,6 +67,13 @@ impl CanonicalDeserialize for BlockType {
     CanonicalDeserialize,
 )]
 pub struct ViewNum(pub i64);
+
+impl Display for ViewNum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl ViewNum {
     pub fn incr(&self) -> Self {
         ViewNum(self.0 + 1)
@@ -87,6 +95,13 @@ impl ViewNum {
     CanonicalDeserialize,
 )]
 pub struct SlotNum(pub u64);
+
+impl Display for SlotNum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl SlotNum {
     pub fn is_pred(&self, other: SlotNum) -> bool {
         self.0 + 1 == other.0
@@ -126,7 +141,7 @@ pub struct BlockHash(pub u64);
 pub struct BlockKey {
     pub type_: BlockType,
     pub view: ViewNum,
-    pub height: usize,
+    pub height: u64,
     pub author: Option<Identity>, // TODO: refactor genesis handling to make this mandatory
     pub slot: SlotNum,
     pub hash: Option<BlockHash>,
@@ -332,5 +347,3 @@ pub enum Phase {
     High = 0,
     Low = 1,
 }
-
-

@@ -125,7 +125,7 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshPartial<T> {
         T::serialize_compressed(&self.data, &mut buf).unwrap();
         hints::verify_partial(
             &keybook.hints_setup.as_ref().unwrap().global,
-            &their_key,
+            their_key,
             &buf,
             &self.signature,
         )
@@ -153,7 +153,7 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> Signed<T> {
         T::serialize_compressed(&self.data, &mut buf).unwrap();
         hints::verify_partial(
             &keybook.hints_setup.as_ref().unwrap().global,
-            &their_key,
+            their_key,
             &buf,
             &self.signature,
         )

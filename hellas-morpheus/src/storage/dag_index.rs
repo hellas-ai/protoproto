@@ -27,7 +27,7 @@ pub struct DAGIndex<Tr: Transaction> {
     pub tips: Vec<FinishedQC>,
 
     /// Tracks the maximum height block seen and its key
-    pub max_height: (usize, BlockKey),
+    pub max_height: (u64, BlockKey),
 }
 
 impl<Tr: Transaction> DAGIndex<Tr> {
@@ -56,7 +56,7 @@ impl<Tr: Transaction> DAGIndex<Tr> {
     /// - The max_height if necessary
     pub fn insert_block(&mut self, block: &Arc<Signed<Block<Tr>>>) -> bool {
         let block_key = block.data.key.clone();
-        
+
         if self.blocks.contains_key(&block_key) {
             tracing::warn!(target: "duplicate_block", key = ?block_key);
             return false;
@@ -89,7 +89,7 @@ impl<Tr: Transaction> DAGIndex<Tr> {
     /// - Become a new tip if it's not observed by existing tips
     pub fn update_tips_for_qc(&mut self, qc: FinishedQC) {
         let mut tips_to_remove = BTreeSet::new();
-        
+
         // Check if the new QC observes any existing tips
         for tip in &self.tips {
             if self.observes(&qc.data, &tip.data) {
@@ -105,8 +105,11 @@ impl<Tr: Transaction> DAGIndex<Tr> {
             tracing::debug!(target: "new_tip", reason = "extends existing tip", qc = ?qc.data);
         } else {
             // Check if any existing tip observes the new QC
-            let observed_by_existing = self.tips.iter().any(|tip| self.observes(&tip.data, &qc.data));
-            
+            let observed_by_existing = self
+                .tips
+                .iter()
+                .any(|tip| self.observes(&tip.data, &qc.data));
+
             if !observed_by_existing {
                 // This QC is a new branch
                 self.tips.push(qc.clone());
@@ -126,11 +129,11 @@ impl<Tr: Transaction> DAGIndex<Tr> {
             return false;
         }
 
-        match self.tips.get(0) {
+        match self.tips.first() {
             Some(tip) => self
                 .block_pointed_by
                 .get(&tip.data.for_which)
-                .map_or(false, |parents| {
+                .is_some_and(|parents| {
                     parents.len() == 1 && parents.first().unwrap() == block_key
                 }),
             None => false,
@@ -142,7 +145,9 @@ impl<Tr: Transaction> DAGIndex<Tr> {
         self.blocks
             .get(block_key)
             .map(|block| {
-                block.data.prev
+                block
+                    .data
+                    .prev
                     .iter()
                     .map(|qc| qc.data.for_which.clone())
                     .collect()
@@ -162,9 +167,9 @@ impl<Tr: Transaction> DAGIndex<Tr> {
     pub fn get_observed_blocks(&self, root: &BlockKey) -> BTreeSet<BlockKey> {
         let mut observed = BTreeSet::new();
         let mut to_visit = VecDeque::new();
-        
+
         to_visit.push_back(root.clone());
-        
+
         while let Some(current) = to_visit.pop_front() {
             if observed.insert(current.clone()) {
                 // Add all blocks this one points to
@@ -173,7 +178,7 @@ impl<Tr: Transaction> DAGIndex<Tr> {
                 }
             }
         }
-        
+
         observed
     }
 
@@ -235,4 +240,4 @@ mod tests {
         // Test creation and basic operations
         // TODO: Add comprehensive tests
     }
-} 
+}

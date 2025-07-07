@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::*;
+use serde::{Deserialize, Serialize};
 
 /// External actions that trigger state transitions in the protocol
 /// These represent observable, externally-useful events that can be visualized
@@ -11,17 +11,17 @@ pub enum Action<Tr: Transaction> {
         #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
         payload: Message<Tr>,
     },
-    
+
     /// Update the current time
     SetTime(u128),
-    
+
     /// Provide new transactions for block production
     #[serde(with = "ark_serialize::vec_compressed_checked")]
     SetReadyTransactions(Vec<Tr>),
-    
+
     /// Check for timeouts and trigger appropriate actions
     CheckTimeouts,
-    
+
     /// Attempt to produce blocks if conditions are met
     CheckProduceBlocks,
 }
@@ -31,7 +31,11 @@ impl<Tr: Transaction> Action<Tr> {
     pub fn description(&self) -> String {
         match self {
             Action::ProcessMessage { sender, payload } => {
-                format!("Process message from {} - {}", sender.0, payload.description())
+                format!(
+                    "Process message from {} - {}",
+                    sender.0,
+                    payload.description()
+                )
             }
             Action::SetTime(time) => format!("Set time to {}", time),
             Action::SetReadyTransactions(txs) => {
@@ -55,4 +59,4 @@ impl<Tr: Transaction> Message<Tr> {
             Message::StartView(sv) => format!("Start view {}", sv.data.view.0),
         }
     }
-} 
+}

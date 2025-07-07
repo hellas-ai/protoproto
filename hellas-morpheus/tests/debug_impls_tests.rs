@@ -1,6 +1,6 @@
 use hellas_morpheus::{
-    Block, BlockData, BlockHash, BlockKey, BlockType, Identity, Message, Phase, Signed, SlotNum,
-    StartView, ThreshPartial, ThreshSigned, ViewNum, VoteData, test_harness::TestTransaction,
+    test_harness::TestTransaction, Block, BlockData, BlockHash, BlockKey, BlockType, Identity,
+    Message, Phase, Signed, SlotNum, StartView, ThreshPartial, ThreshSigned, ViewNum, VoteData,
 };
 use std::sync::Arc;
 
@@ -44,7 +44,10 @@ fn test_format_functions() {
         prev: vec![thresh_signed_vote.clone()],
         one: thresh_signed_vote.clone(),
         data: BlockData::Tr {
-            transactions: vec![TestTransaction(vec![1, 2, 3, 4])],
+            transactions: vec![TestTransaction {
+                id: 0,
+                data: vec![1, 2, 3, 4],
+            }],
         },
     };
 

@@ -50,7 +50,7 @@ impl QCIndex {
     pub fn new(genesis_qc: FinishedQC) -> Self {
         Self {
             qcs: BTreeSet::from([genesis_qc.clone()]),
-            max_view: (ViewNum(-1), genesis_qc.clone()),
+            max_view: (genesis_qc.data.for_which.view, genesis_qc.clone()),
             max_1qc: genesis_qc,
             latest_leader_1qc: None,
             latest_leader_qc: None,
@@ -74,11 +74,9 @@ impl QCIndex {
         }
 
         // Update max_1qc if this is a 1-QC
-        if qc.data.z == 1 {
-            if self.max_1qc.data.compare_qc(&qc.data) != std::cmp::Ordering::Greater {
-                tracing::debug!(target: "new_max_1qc", old_max_1qc = ?self.max_1qc.data, new_1qc = ?qc.data);
-                self.max_1qc = qc.clone();
-            }
+        if qc.data.z == 1 && self.max_1qc.data.compare_qc(&qc.data) != std::cmp::Ordering::Greater {
+            tracing::debug!(target: "new_max_1qc", old_max_1qc = ?self.max_1qc.data, new_1qc = ?qc.data);
+            self.max_1qc = qc.clone();
         }
 
         // All new QCs are unfinalized until proven otherwise
@@ -96,7 +94,13 @@ impl QCIndex {
     }
 
     /// Updates latest QCs for blocks produced by a specific process
-    pub fn update_latest_qcs(&mut self, qc: &FinishedQC, process_id: &Identity, slot_i_lead: SlotNum, slot_i_tr: SlotNum) {
+    pub fn update_latest_qcs(
+        &mut self,
+        qc: &FinishedQC,
+        process_id: &Identity,
+        slot_i_lead: SlotNum,
+        slot_i_tr: SlotNum,
+    ) {
         if let Some(author) = &qc.data.for_which.author {
             if author == process_id {
                 match qc.data.for_which.type_ {
@@ -121,7 +125,7 @@ impl QCIndex {
     pub fn finalize_blocks_observed_by(
         &mut self,
         qc: &FinishedQC,
-        observes_fn: impl Fn(&VoteData, &VoteData) -> bool
+        observes_fn: impl Fn(&VoteData, &VoteData) -> bool,
     ) -> BTreeSet<FinishedQC> {
         let mut finalized_here = BTreeSet::new();
 
@@ -133,7 +137,8 @@ impl QCIndex {
         }
 
         // Remove finalized QCs from unfinalized_2qc
-        self.unfinalized_2qc.retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
+        self.unfinalized_2qc
+            .retain(|unfinalized_2qc| !finalized_here.contains(unfinalized_2qc));
 
         // Mark blocks as finalized
         for finalized_qc in &finalized_here {
@@ -166,13 +171,15 @@ impl QCIndex {
 
     /// Checks if we have a specific z-QC for a block
     pub fn has_z_qc(&self, block_key: &BlockKey, z: u8) -> bool {
-        self.qcs.iter().any(|qc| &qc.data.for_which == block_key && qc.data.z == z)
+        self.qcs
+            .iter()
+            .any(|qc| &qc.data.for_which == block_key && qc.data.z == z)
     }
 
     /// Check if we have a QC
     pub fn contains_qc(&self, qc: &FinishedQC) -> bool {
-        let key = (qc.data.z, qc.data.for_which.clone());
-        self.qcs.contains(&*qc)
+        let _key = (qc.data.z, qc.data.for_which.clone());
+        self.qcs.contains(qc)
     }
 }
 
@@ -183,4 +190,4 @@ mod tests {
         // Test creation and basic operations
         // TODO: Add comprehensive tests
     }
-} 
+}

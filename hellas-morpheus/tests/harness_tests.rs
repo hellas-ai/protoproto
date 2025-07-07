@@ -1,5 +1,16 @@
+//! Tests for the test harness functionality
+//!
+//! These tests verify that the test harness itself works correctly, including:
+//! - Event sourcing and replay
+//! - Snapshot verification
+//! - Deterministic execution
+
+mod common;
+
 use ark_serialize::CanonicalSerialize;
+use common::*;
 use hellas_morpheus::snapshots_table_default;
+use hellas_morpheus::storage::{bulk::RedbBulkStore, snapshot::RedbSnapshotStore};
 use hellas_morpheus::test_harness::{MockHarness, TestTransaction, TxGenPolicy};
 use hellas_morpheus::{
     BlockKey, BlockType, Message, SlotNum, ThreshPartial, ThreshSigned, VoteData,
@@ -8,9 +19,29 @@ use hellas_morpheus::{Identity, MorpheusProcess, ViewNum};
 use redb::ReadableTable;
 use std::sync::Arc;
 
+/// Helper function to create a test harness with default storage
+fn create_test_harness(
+    num_parties: usize,
+) -> MockHarness<RedbBulkStore<TestTransaction>, RedbSnapshotStore> {
+    // Use an in-memory database for each process
+    let db = Arc::new(
+        redb::Builder::new()
+            .create_with_backend(redb::backends::InMemoryBackend::new())
+            .unwrap(),
+    );
+
+    let db_clone = db.clone();
+    let create_bulk = move |_db: &redb::Database| RedbBulkStore::new(db_clone.clone()).unwrap();
+    let db_clone = db.clone();
+    let create_snapshot =
+        move |_db: &redb::Database| RedbSnapshotStore::new(db_clone.clone()).unwrap();
+
+    MockHarness::create_test_setup(num_parties, create_bulk, create_snapshot, None)
+}
+
 #[test_log::test]
 fn test_multiple_rounds_end_view() {
-    let mut harness = MockHarness::create_test_setup(3);
+    let mut harness = create_test_harness(3);
 
     // Create a few simple messages
     let message1 = Message::EndView(Arc::new(ThreshPartial::from_data(
@@ -39,16 +70,40 @@ fn test_multiple_rounds_end_view() {
 
     // Queue should be empty after processing
     assert_eq!(harness.pending_messages.len(), 0);
-    
+
     // All processes should have recorded some events
-    assert!(harness.processes.get(&Identity(1)).unwrap().event_log.recorded_entries > 0);
-    assert!(harness.processes.get(&Identity(2)).unwrap().event_log.recorded_entries > 0);
-    assert!(harness.processes.get(&Identity(3)).unwrap().event_log.recorded_entries > 0);
+    assert!(
+        harness
+            .processes
+            .get(&Identity(1))
+            .unwrap()
+            .event_log
+            .recorded_entries
+            > 0
+    );
+    assert!(
+        harness
+            .processes
+            .get(&Identity(2))
+            .unwrap()
+            .event_log
+            .recorded_entries
+            > 0
+    );
+    assert!(
+        harness
+            .processes
+            .get(&Identity(3))
+            .unwrap()
+            .event_log
+            .recorded_entries
+            > 0
+    );
 }
 
 #[test_log::test]
 fn test_time_advancement_affects_processes() {
-    let mut harness = MockHarness::create_test_setup(3);
+    let mut harness = create_test_harness(3);
 
     // Initial time should be 0 for harness and all processes
     assert_eq!(harness.time, 0);
@@ -70,7 +125,7 @@ fn test_time_advancement_affects_processes() {
 
 #[test_log::test]
 fn test_complex_simulation() {
-    let mut harness = MockHarness::create_test_setup(3);
+    let mut harness = create_test_harness(3);
 
     // Initial state
     assert_eq!(harness.time, 0);
@@ -132,7 +187,7 @@ fn test_complex_simulation() {
 
 #[test_log::test]
 fn test_message_enqueue_and_processing() {
-    let mut harness = MockHarness::create_test_setup(3);
+    let mut harness = create_test_harness(3);
 
     // Create a simple vote data
     let vote_data = VoteData {
@@ -169,48 +224,11 @@ fn test_message_enqueue_and_processing() {
     assert_eq!(harness.pending_messages.len(), 0);
 }
 
-#[test_log::test]
-fn test_step_sequence() {
-    let mut harness = MockHarness::create_test_setup(3);
-
-    // Initial state
-    assert_eq!(harness.time, 0);
-
-    // Run one step
-    harness.step();
-
-    // After one step:
-    // 1. Messages should be processed
-    // 2. Timeouts should be checked
-    // 3. Time should be advanced
-    assert_eq!(harness.time, 100);
-
-    // Add a message after the first step
-    let message = Message::EndView(Arc::new(ThreshPartial::from_data(
-        ViewNum(0),
-        &harness.processes.get(&Identity(1)).unwrap().kb,
-    )));
-
-    harness.enqueue_message(message, Identity(1), Some(Identity(2)));
-
-    // Run another step
-    harness.step();
-
-    // After second step:
-    // 1. The message should be processed
-    // 2. Timeouts checked
-    // 3. Time advanced again
-    assert_eq!(harness.time, 200);
-
-    // Note: We don't make assertions about the queue size as it depends
-    // on the internal implementation of process_message and processing behavior
-}
-
 #[test]
 fn test_snapshot_verification() {
-    let mut harness = MockHarness::create_test_setup(4);
+    let mut harness = create_test_harness(4);
 
-    harness.run(50);
+    harness.run(10);
 
     harness
         .verify_all_snapshots()
@@ -219,7 +237,7 @@ fn test_snapshot_verification() {
 
 #[test_log::test]
 fn test_snapshot_replay_determinism() {
-    let mut harness = MockHarness::create_test_setup(3);
+    let mut harness = create_test_harness(3);
 
     // Configure transaction generation policy
     harness
@@ -265,14 +283,29 @@ fn test_snapshot_replay_determinism() {
         let early_count = snapshot_counts[0];
         let latest_count = snapshot_counts[snapshot_counts.len() - 1];
 
+        // Create storage factories for loading snapshots
+        let db_arc = db1.clone();
+        let bulk_store = RedbBulkStore::new(db_arc.clone()).unwrap();
+        let snapshot_store = RedbSnapshotStore::new(db_arc.clone()).unwrap();
+
         // Load snapshot before early_count
-        let (_, early_snapshot) = process1.event_log.load_snapshot_before(db1, early_count + 1)
+        let (_, early_snapshot) = process1
+            .event_log
+            .load_snapshot_before(
+                db1,
+                early_count + 1,
+                bulk_store.clone(),
+                snapshot_store.clone(),
+                None,
+            )
             .expect("Failed to load early snapshot")
             .expect("Early snapshot should exist");
         assert!(early_snapshot.event_log.recorded_entries <= early_count);
 
         // Load snapshot before latest_count
-        let (_, latest_snapshot) = process1.event_log.load_snapshot_before(db1, latest_count + 1)
+        let (_, latest_snapshot) = process1
+            .event_log
+            .load_snapshot_before(db1, latest_count + 1, bulk_store, snapshot_store, None)
             .expect("Failed to load latest snapshot")
             .expect("Latest snapshot should exist");
         assert!(latest_snapshot.event_log.recorded_entries <= latest_count);

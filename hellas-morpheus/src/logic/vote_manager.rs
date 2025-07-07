@@ -25,15 +25,15 @@ pub struct QuorumTrack<T: Ord + CanonicalSerialize + CanonicalDeserialize + Vali
 pub struct Duplicate;
 
 impl<
-    T: Ord
-        + Clone
-        + CanonicalSerialize
-        + CanonicalDeserialize
-        + Valid
-        + Serialize
-        + for<'d> Deserialize<'d>
-        + 'static,
-> QuorumTrack<T>
+        T: Ord
+            + Clone
+            + CanonicalSerialize
+            + CanonicalDeserialize
+            + Valid
+            + Serialize
+            + for<'d> Deserialize<'d>
+            + 'static,
+    > QuorumTrack<T>
 {
     /// Records a new vote and returns the number of votes collected for this data
     ///
@@ -44,7 +44,7 @@ impl<
         let votes_now = self
             .votes
             .entry(vote.data.clone())
-            .or_insert(BTreeMap::new());
+            .or_default();
 
         // Ensure each process only votes once (for safety)
         if votes_now.contains_key(&vote.author) {
@@ -75,6 +75,12 @@ pub struct VoteManager {
 
     /// Tracks pending votes organized by view
     pub pending_votes: BTreeMap<ViewNum, PendingVotes>,
+}
+
+impl Default for VoteManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VoteManager {
