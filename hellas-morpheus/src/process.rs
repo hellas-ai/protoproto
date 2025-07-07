@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 pub struct MorpheusProcess<Tr: Transaction> {
     #[debug(skip)]
     pub kb: KeyBook,
+    /// helps disambiguate replays...
+    pub chainid: [u8; 32],
 
     #[derivative(PartialEq = "ignore")]
     pub replaying: bool,
@@ -181,6 +183,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
 
         let mut p = MorpheusProcess {
             kb: keybook,
+            chainid: [0; 32],
             replaying: false,
             id,
             view_i: ViewNum(0),
