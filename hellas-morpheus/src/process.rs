@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::serialization::Postcard;
 use crate::state_tracking::{PendingVotes, StateIndex};
 use crate::*;
 use fastbloom::BloomFilter;
