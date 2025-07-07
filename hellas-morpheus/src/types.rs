@@ -333,16 +333,4 @@ pub enum Phase {
     Low = 1,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Ord, Serialize, Deserialize, Debug)]
-pub enum Event<Tr: Transaction> {
-    ProcessMessage {
-        sender: Identity,
-        #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
-        payload: Message<Tr>,
-    },
-    SetNow(u128),
-    #[serde(with = "ark_serialize::vec_compressed_checked")]
-    SetReadyTransactions(Vec<Tr>),
-    CheckTimeouts,
-    CheckProduceBlocks,
-}
+

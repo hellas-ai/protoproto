@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
     Ord,
     Debug,
     Serialize,
+    Default,
     Deserialize,
     CanonicalSerialize,
     CanonicalDeserialize,
@@ -20,14 +21,14 @@ use std::collections::BTreeMap;
 pub struct Identity(pub u32);
 
 /// Collects the public keys of all identities.
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize, Default)]
 pub struct KeyBook {
     pub keys: BTreeMap<Identity, hints::PublicKey>,
     pub identities: BTreeMap<hints::PublicKey, Identity>,
     pub me_identity: Identity,
     pub me_pub_key: hints::PublicKey,
     pub me_sec_key: hints::SecretKey,
-    pub hints_setup: hints::UniverseSetup,
+    pub hints_setup: Option<hints::UniverseSetup>,
 }
 
 #[derive(
@@ -95,7 +96,7 @@ pub struct ThreshPartial<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
 
 impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshSigned<T> {
     pub fn valid_signature(&self, keybook: &KeyBook, threshold: u32) -> bool {
-        let verifier = keybook.hints_setup.verifier();
+        let verifier = keybook.hints_setup.as_ref().unwrap().verifier();
         let mut buf = Vec::new();
         T::serialize_compressed(&self.data, &mut buf).unwrap();
         hints::verify_aggregate(&verifier, &self.signature, &buf).is_ok()
@@ -123,7 +124,7 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshPartial<T> {
         let mut buf = Vec::new();
         T::serialize_compressed(&self.data, &mut buf).unwrap();
         hints::verify_partial(
-            &keybook.hints_setup.global,
+            &keybook.hints_setup.as_ref().unwrap().global,
             &their_key,
             &buf,
             &self.signature,
@@ -151,7 +152,7 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> Signed<T> {
         let mut buf = Vec::new();
         T::serialize_compressed(&self.data, &mut buf).unwrap();
         hints::verify_partial(
-            &keybook.hints_setup.global,
+            &keybook.hints_setup.as_ref().unwrap().global,
             &their_key,
             &buf,
             &self.signature,

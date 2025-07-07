@@ -316,7 +316,7 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 }
 
                 let leader = block.key.author.clone().unwrap();
-                if !self.verify_leader(leader.clone(), block.key.view) {
+                if !self.view_manager.is_leader(leader.clone(), block.key.view) {
                     return Err(BlockValidationError::NotLeader {
                         leader,
                         view: block.key.view,

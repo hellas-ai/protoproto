@@ -18,33 +18,32 @@
 //!
 //! ## Implementation Structure
 //!
-//! - `process.rs`: Defines the core `MorpheusProcess` struct and message handling
-//! - `block_production.rs`: Implements block creation logic
+//! - `process.rs`: Defines the core `MorpheusProcess` struct with component-based architecture
+//! - `processor.rs`: Implements pure functional action processing
+//! - `effects.rs`: Defines state mutation effects
+//! - `actions.rs`: Defines external action types
 //! - `state_tracking.rs`: Manages protocol state (blocks, QCs, DAG structure)
 //! - `types.rs`: Defines protocol data types
-//! - `mock_harness.rs`: Testing framework for the protocol
+//! - `test_harness.rs`: Testing framework for the protocol
 //! - `tracing_setup.rs`: Structured logging with tracing-rs
-//! - `hades/`: Web-based visualization and debugging interface
-//!
-//! ## Key Protocol Concepts
-//!
-//! - **Quorum Certificates (QCs)**: Proofs that n-f processes have voted for a block
-//! - **z-votes**: Votes at different levels (0, 1, 2) for blocks
-//! - **Observes relation**: Defines the DAG structure and block ordering
-//! - **View changes**: Allow progress when a leader is faulty
 
-mod block_production;
+mod actions;
+mod block_producer;
 mod block_validation;
 mod crypto;
-mod invariants;
-mod message_handling;
+mod dag_index;
+mod effects;
+mod event_log;
 mod process;
+mod processor;
+mod qc_index;
 mod serialization;
-mod snapshot;
 mod state_tracking;
+mod timeout_manager;
 mod types;
-mod view_management;
-mod voting;
+mod view_index;
+mod view_manager;
+mod vote_manager;
 mod config;
 
 pub mod format;
@@ -55,15 +54,17 @@ use std::{fmt::Debug, hash::Hash};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 
+pub use actions::Action;
 pub use block_validation::BlockValidationError;
 pub use crypto::*;
-pub use invariants::InvariantViolation;
+pub use effects::Effect;
+pub use event_log::{EventLog, LogEntry, default_snapshots_table as snapshots_table_default};
 pub use process::*;
 pub use state_tracking::{PendingVotes, StateIndex};
 pub use types::*;
-pub use voting::*;
+pub use processor::{ActionProcessor, ProcessState};
 
 pub trait Transaction:
-    Sync + Clone + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug + 'static
+    Sync + Clone + Default + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug + serde::Serialize + for<'de> serde::Deserialize<'de> + 'static
 {
 }
