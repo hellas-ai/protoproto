@@ -1,176 +1,260 @@
-#![allow(non_upper_case_globals)]
-
-use std::net::{Ipv4Addr, SocketAddr};
+//! Native Hellas node binary
 
 use anyhow::Result;
-use axum::{
-    extract::{Path, State},
-    http::{header::CONTENT_TYPE, Method, StatusCode},
-    response::{Html, IntoResponse},
-    routing::get,
-    Router,
-};
-use futures::StreamExt;
-use libp2p::identity::Keypair;
-use libp2p::{
-    core::{muxing::StreamMuxerBox, Transport},
-    multiaddr::{Multiaddr, Protocol},
-    ping,
-    swarm::SwarmEvent,
-};
-use libp2p_webrtc as webrtc;
-use tokio::net::TcpListener;
-use tower_http::cors::{Any, CorsLayer};
+use clap::{Parser, Subcommand};
+use hellas_node::{Node, NodeConfig, NetworkConfig, ConsensusConfig, ProtocolConfig, HellasTicket};
+use hellas_protocol::{SignedTransaction, Transaction, VerifyingKey, SigningKey, Pubkey, Amount, ObjectId};
+use iroh_base::key::SecretKey;
+use tokio::time::{sleep, Duration};
+use tracing::{info, error, warn};
 
-use native_node::cli::{self, Subcommands, TopLevel};
-use tracing_subscriber::EnvFilter;
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Start a new Hellas network
+    Start {
+        /// Port to listen on (default: random)
+        #[arg(short, long)]
+        port: Option<u16>,
+
+        /// Enable mDNS discovery
+        #[arg(long, default_value = "true")]
+        enable_mdns: bool,
+
+        /// Enable relay server
+        #[arg(long, default_value = "true")]
+        enable_relay: bool,
+    },
+
+    /// Join an existing Hellas network
+    Join {
+        /// Network ticket to join
+        ticket: String,
+
+        /// Port to listen on (default: random)
+        #[arg(short, long)]
+        port: Option<u16>,
+    },
+
+    /// Generate a new node key
+    GenKey,
+}
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or(EnvFilter::from("info")))
-        .try_init();
+async fn main() -> Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("hellas_node=info".parse()?)
+                .add_directive("hellas_morpheus=info".parse()?)
+                .add_directive("hellas_protocol=info".parse()?)
+                .add_directive("iroh=warn".parse()?)
+        )
+        .init();
 
-    let whats_up: TopLevel = argh::from_env();
+    let args = Args::parse();
 
-    tracing::info!("invocation: {:?}", whats_up);
-    match whats_up.nested {
-        Subcommands::RunDaemon(cli::RunDaemon {
-            privkey,
-            port,
-            webui_listen,
-        }) => {
-            tracing::info!("Running daemon");
-            let keybytes =
-                hex::decode(privkey).map_err(|e| anyhow::anyhow!("Invalid privkey hex: {}", e))?;
-
-            let me = Keypair::ed25519_from_bytes(keybytes).map_err(|e| anyhow::anyhow!(e))?;
-
-            let mut swarm = libp2p::SwarmBuilder::with_existing_identity(me)
-                .with_tokio()
-                .with_other_transport(|id_keys| {
-                    Ok(webrtc::tokio::Transport::new(
-                        id_keys.clone(),
-                        webrtc::tokio::Certificate::generate(&mut rand::thread_rng())?,
-                    )
-                    .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn))))
-                })?
-                .with_behaviour(|_| ping::Behaviour::default())?
-                .build();
-
-            let address_webrtc = Multiaddr::from(Ipv4Addr::UNSPECIFIED)
-                .with(Protocol::Udp(port))
-                .with(Protocol::WebRTCDirect);
-
-            swarm.listen_on(address_webrtc.clone())?;
-
-            let address = loop {
-                if let SwarmEvent::NewListenAddr { address, .. } = swarm.select_next_some().await {
-                    if address
-                        .iter()
-                        .any(|e| e == Protocol::Ip4(Ipv4Addr::LOCALHOST))
-                    {
-                        tracing::debug!(
-                            "Ignoring localhost address to make sure the example works in Firefox"
-                        );
-                        continue;
-                    }
-
-                    tracing::info!(%address, "Listening");
-
-                    break address;
-                }
-            };
-
-            let addr = address.with(Protocol::P2p(*swarm.local_peer_id()));
-
-            // Serve .wasm, .js and server multiaddress over HTTP on this address.
-            tokio::spawn(serve(addr, webui_listen));
-
-            loop {
-                tokio::select! {
-                    swarm_event = swarm.next() => {
-                        tracing::trace!(?swarm_event)
-                    },
-                    _ = tokio::signal::ctrl_c() => {
-                        break;
-                    }
-                }
-            }
-
-            Ok(())
+    match args.command {
+        Commands::Start { port, enable_mdns, enable_relay } => {
+            start_node(port, enable_mdns, enable_relay).await?;
+        }
+        Commands::Join { ticket, port } => {
+            join_network(&ticket, port).await?;
+        }
+        Commands::GenKey => {
+            generate_key();
         }
     }
+
+    Ok(())
 }
 
-#[derive(rust_embed::RustEmbed)]
-#[folder = "$CARGO_MANIFEST_DIR/static"]
-struct StaticFiles;
+async fn start_node(port: Option<u16>, enable_mdns: bool, enable_relay: bool) -> Result<()> {
+    info!("Starting new Hellas network...");
 
-/// Serve the Multiaddr we are listening on and the host files.
-pub(crate) async fn serve(libp2p_transport: Multiaddr, port: u16) {
-    for path in StaticFiles::iter() {
-        println!("available files: {}", path)
-    }
-
-    let Some(Protocol::Ip4(listen_addr)) = libp2p_transport.iter().next() else {
-        panic!("Expected 1st protocol to be IP4")
+    // Create node configuration
+    let config = NodeConfig {
+        network: NetworkConfig {
+            secret_key: None, // Generate random
+            bootstrap_nodes: vec![],
+            port: port.unwrap_or(0),
+            enable_mdns,
+            enable_relay,
+        },
+        consensus: ConsensusConfig {
+            n: 4,
+            f: 1,
+            delta_ms: 1000,
+            enable_invariant_checks: false,
+        },
+        protocol: ProtocolConfig {
+            chain_id: [1; 32],
+            enable_parallel_execution: true,
+            max_parallel_workers: 4,
+        },
     };
 
-    let server = Router::new()
-        .route("/", get(get_index))
-        .route("/index.html", get(get_index))
-        .route("/:path", get(get_static_file))
-        .with_state(Libp2pEndpoint(libp2p_transport))
-        .layer(
-            // allow cors
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods([Method::GET]),
-        );
+    // Create and start the node
+    let node = Node::new(config).await?;
+    
+    // Get node ID and create ticket for others to join
+    let ticket = node.create_ticket()?;
+    info!("Node started successfully!");
+    info!("Node ID: {}", node.node_id());
+    info!("");
+    info!("To join this network from another node, run:");
+    info!("  hellas-node join {}", ticket);
+    
+    // Run the node
+    let (task, handle) = node.run().await?;
 
-    let addr = SocketAddr::new(listen_addr.into(), port);
+    // Spawn a task to periodically show status
+    let status_handle = handle.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(30)).await;
+            
+            match status_handle.get_status().await {
+                Ok(status) => {
+                    info!(
+                        "Status - View: {}, Finalized: {}, Pending: {}, Peers: {}",
+                        status.consensus_view,
+                        status.finalized_blocks,
+                        status.pending_transactions,
+                        status.connected_peers.len()
+                    );
+                }
+                Err(e) => error!("Failed to get status: {}", e),
+            }
+        }
+    });
 
-    tracing::info!(url=%format!("http://{addr}"), "Serving client files at url");
+    // Spawn a task to submit example transactions
+    let tx_handle = handle.clone();
+    tokio::spawn(async move {
+        sleep(Duration::from_secs(10)).await;
+        
+        loop {
+            // Create a dummy transaction
+            let tx = create_example_transaction();
+            
+            match tx_handle.submit_transaction(tx).await {
+                Ok(_effects) => info!("Transaction submitted successfully"),
+                Err(e) => error!("Failed to submit transaction: {}", e),
+            }
+            
+            sleep(Duration::from_secs(60)).await;
+        }
+    });
 
-    axum::serve(
-        TcpListener::bind((listen_addr, port)).await.unwrap(),
-        server.into_make_service(),
-    )
-    .await
-    .unwrap();
+    // Wait for the node task
+    info!("Node running. Press Ctrl+C to stop.");
+    task.await?;
+
+    Ok(())
 }
 
-#[derive(Clone)]
-struct Libp2pEndpoint(Multiaddr);
+async fn join_network(ticket_str: &str, port: Option<u16>) -> Result<()> {
+    info!("Joining Hellas network...");
 
-/// Serves the index.html file for our client.
-///
-/// Our server listens on a random UDP port for the WebRTC transport.
-/// To allow the client to connect, we replace the `__LIBP2P_ENDPOINT__`
-/// placeholder with the actual address.
-async fn get_index(
-    State(Libp2pEndpoint(libp2p_endpoint)): State<Libp2pEndpoint>,
-) -> Result<Html<String>, StatusCode> {
-    let content = StaticFiles::get("index.html")
-        .ok_or(StatusCode::NOT_FOUND)?
-        .data;
+    // Parse the ticket
+    let ticket: HellasTicket = ticket_str.parse()?;
+    
+    // Create node configuration
+    let config = NodeConfig {
+        network: NetworkConfig {
+            secret_key: None, // Generate random
+            bootstrap_nodes: vec![],
+            port: port.unwrap_or(0),
+            enable_mdns: false, // Disable mDNS when joining via ticket
+            enable_relay: true,
+        },
+        consensus: ConsensusConfig {
+            n: 4,
+            f: 1,
+            delta_ms: 1000,
+            enable_invariant_checks: false,
+        },
+        protocol: ProtocolConfig {
+            chain_id: [1; 32],
+            enable_parallel_execution: true,
+            max_parallel_workers: 4,
+        },
+    };
+    
+    // Create node
+    let node = Node::new(config).await?;
+    
+    // Join the network
+    info!("Connecting to network...");
+    node.join_network(ticket).await?;
+    
+    info!("Successfully joined network!");
+    info!("Node ID: {}", node.node_id());
+    
+    // Run the node
+    let (task, handle) = node.run().await?;
 
-    let html = std::str::from_utf8(&content)
-        .expect("index.html to be valid utf8")
-        .replace("__LIBP2P_ENDPOINT__", &libp2p_endpoint.to_string());
+    // Spawn status monitoring task
+    let status_handle = handle.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(30)).await;
+            
+            match status_handle.get_status().await {
+                Ok(status) => {
+                    info!(
+                        "Status - View: {}, Finalized: {}, Pending: {}, Peers: {}",
+                        status.consensus_view,
+                        status.finalized_blocks,
+                        status.pending_transactions,
+                        status.connected_peers.len()
+                    );
+                }
+                Err(e) => error!("Failed to get status: {}", e),
+            }
+        }
+    });
 
-    Ok(Html(html))
+    // Wait for the node task
+    info!("Node running. Press Ctrl+C to stop.");
+    task.await?;
+
+    Ok(())
 }
 
-/// Serves the static files generated by `wasm-pack`.
-async fn get_static_file(Path(path): Path<String>) -> Result<impl IntoResponse, StatusCode> {
-    tracing::debug!(file_path=%path, "Serving static file");
-
-    let content = StaticFiles::get(&path).ok_or(StatusCode::NOT_FOUND)?.data;
-    let content_type = mime_guess::from_path(path)
-        .first_or_octet_stream()
-        .to_string();
-
-    Ok(([(CONTENT_TYPE, content_type)], content))
+fn generate_key() {
+    let secret_key = SecretKey::generate();
+    let public_key = secret_key.public_key();
+    
+    println!("Generated new node key:");
+    println!("Secret key: {}", hex::encode(secret_key.to_bytes()));
+    println!("Public key: {}", public_key);
 }
+
+/// Create an example transaction
+fn create_example_transaction() -> SignedTransaction {
+    use hellas_protocol::{Transaction as ProtocolTransaction};
+    
+    // Generate a test keypair
+    let signing_key = SigningKey::new_random();
+    let verifying_key = signing_key.verifying_key();
+    
+    // Create a simple transfer transaction
+    let tx = ProtocolTransaction::Transfer {
+        from: ObjectId::derive_from_pubkey(&Pubkey::from(verifying_key)),
+        to: ObjectId::new_random(),
+        amount: Amount(1000),
+        nonce: 0,
+    };
+    
+    // Sign the transaction
+    SignedTransaction::new(tx, &signing_key)
+} 

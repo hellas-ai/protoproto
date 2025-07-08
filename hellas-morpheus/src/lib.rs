@@ -32,7 +32,9 @@ mod crypto;
 mod logic;
 mod process;
 mod storage;
+mod state;
 mod types;
+
 
 pub mod format;
 pub mod test_harness;
@@ -45,6 +47,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 pub use crypto::*;
 pub use logic::*;
 pub use process::*;
+pub use state::{ProcessState, PendingVotes};
 pub use storage::*;
 pub use types::*;
 

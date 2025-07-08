@@ -125,11 +125,7 @@ pub fn setup_test_crypto(n: u32) -> (KeyBook, Vec<hints::SecretKey>, Vec<hints::
 /// Create a test process with given identity
 pub fn create_test_process_with_id(
     id: Identity,
-) -> MorpheusProcess<
-    TestTransaction,
-    RedbBulkStore<TestTransaction>,
-    RedbSnapshotStore,
-> {
+) -> MorpheusProcess<TestTransaction> {
     let db = create_test_db();
     let (mut kb, privs, pubkeys) = setup_test_crypto(1); // Assuming n=1 for simplicity in this test
 
@@ -138,10 +134,7 @@ pub fn create_test_process_with_id(
     kb.me_pub_key = pubkeys[(id.0 as usize) - 1].clone();
     kb.me_sec_key = privs[(id.0 as usize) - 1].clone();
 
-    let bulk_store = RedbBulkStore::new(db.clone()).unwrap();
-    let snapshot_store = RedbSnapshotStore::new(db.clone()).unwrap();
-
-    MorpheusProcess::new(&db, kb, id, 1, 0, bulk_store, snapshot_store, None).unwrap()
+    MorpheusProcess::new(db, kb, id, 1, 0).unwrap()
 }
 
 /// Create a simple test message

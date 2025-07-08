@@ -6,6 +6,15 @@ use std::{
 
 use crate::*;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct PendingVotes {
+    pub tr_1: BTreeMap<BlockKey, bool>,
+    pub tr_2: BTreeMap<BlockKey, bool>,
+    pub lead_1: BTreeMap<BlockKey, bool>,
+    pub lead_2: BTreeMap<BlockKey, bool>,
+    pub dirty: bool,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 /// Tracks votes for a particular data type and helps form quorums
 ///
@@ -41,10 +50,7 @@ impl<
     /// "A z-quorum for b is a set of n-f z-votes for b, each signed by a different process in Π"
     /// Returns Err(Duplicate) if this process has already voted for this data.
     pub fn record_vote(&mut self, vote: Arc<ThreshPartial<T>>) -> Result<usize, Duplicate> {
-        let votes_now = self
-            .votes
-            .entry(vote.data.clone())
-            .or_default();
+        let votes_now = self.votes.entry(vote.data.clone()).or_default();
 
         // Ensure each process only votes once (for safety)
         if votes_now.contains_key(&vote.author) {

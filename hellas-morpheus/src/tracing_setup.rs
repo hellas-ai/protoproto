@@ -1,103 +1,40 @@
-use tracing::{debug, error, info};
+//! Tracing setup for structured logging
 
-/// Register a new Morpheus process with tracing
-pub fn register_process(id: &crate::Identity, n: u32, f: u32) {
-    info!(target: "register_process", process_id = ?id, total_processes = n, max_faulty = f);
+use crate::*;
+
+/// Register a process with the tracing system
+pub fn register_process(_id: &Identity, _n: u32, _f: u32) {
+    // In a real implementation, this would set up process-specific logging
 }
 
-/// Track protocol transitions such as view changes
+/// Log a protocol state transition
 pub fn protocol_transition(
-    process_id: &crate::Identity,
+    _id: &Identity,
     transition_type: &str,
-    from: impl std::fmt::Debug,
-    to: impl std::fmt::Debug,
+    from: &ViewNum,
+    to: &ViewNum,
     reason: Option<&str>,
 ) {
-    if let Some(reason) = reason {
-        info!(
-            target: "protocol_transition",
-            process_id = ?process_id,
-            transition = transition_type,
-            from = ?from,
-            to = ?to,
-            reason = reason,
-        );
-    } else {
-        info!(
-            target: "protocol_transition",
-            process_id = ?process_id,
-            transition = transition_type,
-            from = ?from,
-            to = ?to,
-        );
-    }
+    tracing::info!(
+        transition = transition_type,
+        from_view = from.0,
+        to_view = to.0,
+        reason = reason,
+        "Protocol transition"
+    );
 }
 
-/// Track message sending for visualization
-pub fn message_sent(
-    from: &crate::Identity,
-    to: Option<&crate::Identity>,
-    message_type: &str,
-    message: impl std::fmt::Debug,
+/// Log block creation
+pub fn block_created(
+    _id: &Identity,
+    block_type: &str,
+    key: &BlockKey,
 ) {
-    if let Some(to) = to {
-        debug!(
-            target: "message_sent",
-            from = ?from,
-            to = ?to,
-            message_type = message_type,
-            message = ?message,
-        );
-    } else {
-        debug!(
-            target: "message_sent",
-            from = ?from,
-            to = "broadcast",
-            message_type = message_type,
-            message = ?message,
-        );
-    }
-}
-
-/// Track block creation events
-pub fn block_created(author: &crate::Identity, block_type: &str, block: impl std::fmt::Debug) {
-    info!(
-        target: "block_created",
-        author = ?author,
+    tracing::info!(
         block_type = block_type,
-        block = ?block,
+        view = key.view.0,
+        height = key.height,
+        slot = key.slot.0,
+        "Block created"
     );
-}
-
-/// Track QC formation events
-pub fn qc_formed(process_id: &crate::Identity, qc_type: u8, qc: impl std::fmt::Debug) {
-    info!(
-        target: "qc_formed",
-        process_id = ?process_id,
-        qc_type = qc_type,
-        qc = ?qc,
-    );
-}
-
-/// Track block finalization events
-pub fn block_finalized(process_id: &crate::Identity, block_key: impl std::fmt::Debug) {
-    info!(
-        target: "block_finalized",
-        process_id = ?process_id,
-        block_key = ?block_key,
-    );
-}
-
-/// Track error conditions that might be interesting for the visualizer
-pub fn protocol_error(
-    process_id: &crate::Identity,
-    error_type: &str,
-    details: impl std::fmt::Debug,
-) {
-    error!(
-        target: "protocol_error",
-        process_id = ?process_id,
-        error_type = error_type,
-        details = ?details,
-    );
-}
+} 

@@ -1,500 +1,238 @@
-//! Storage layer architecture for the Morpheus protocol
+//! Storage V3: Pure persistence layer for the ProcessState architecture
 //!
-//! This module provides a three-tier storage architecture:
-//! 1. Bulk Storage - Append-only storage for immutable consensus artifacts
-//! 2. Snapshot Storage - Lightweight state snapshots that reference bulk storage
-//! 3. Event Log - Already implemented separately for deterministic replay
+//! This module provides:
+//! - Content-addressed bulk storage for deduplication
+//! - Event journal for deterministic replay
+//! - Efficient snapshots that only store essential (non-derived) state
+//! - Clean separation between persistence and state management
 
+use crate::state::ProcessState;
 use crate::*;
+use redb::{Database, ReadableTable};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-pub(crate) mod bulk;
-pub use bulk::*;
-
-pub(crate) mod dag_index;
-pub use dag_index::*;
-
-pub(crate) mod event_log;
-pub use event_log::*;
-
-pub(crate) mod memory;
-pub use memory::*;
-
-pub(crate) mod qc_index;
-pub use qc_index::*;
-
+// Submodules
+pub(crate) mod bulk_store;
+pub(crate) mod event_journal;
 pub(crate) mod serialization;
+pub(crate) mod tables;
+
+// Re-exports
+pub use bulk_store::{BlockRef, BulkStore, ContentHash, ObjectRef};
+pub use event_journal::{EventJournal, JournalEntry};
 pub use serialization::*;
+pub use tables::{Tables};
 
-pub(crate) mod snapshot;
-pub use snapshot::*;
+/// The main storage struct - now a pure persistence layer
+#[derive(Clone)]
+pub struct Storage<Tr: Transaction> {
+    /// The underlying redb database
+    db: Arc<Database>,
 
-pub(crate) mod state_tracking;
-pub use state_tracking::*;
+    /// Bulk store for content-addressed storage
+    pub bulk: BulkStore,
 
-pub(crate) mod view_index;
-pub use view_index::*;
-
-/// Reference to a block in bulk storage
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct BlockRef {
-    /// Block key (unique identifier)
-    pub key: BlockKey,
-    /// Optional content hash for verification
-    pub hash: Option<BlockHash>,
+    /// Event journal for deterministic replay
+    pub journal: EventJournal<Tr>,
 }
 
-/// Reference to a QC in bulk storage
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct QCRef {
-    /// The vote data this QC is for
-    pub vote_data: VoteData,
-    /// Optional hash for verification
-    pub hash: Option<[u8; 32]>,
-}
+impl<Tr: Transaction> Storage<Tr> {
+    /// Create a new storage instance
+    pub fn new(
+        db: Arc<Database>,
+        genesis_block: Arc<Signed<Block<Tr>>>,
+        genesis_qc: FinishedQC,
+    ) -> Result<Self, String> {
+        // Initialize tables
+        Tables::ensure_created(&db)?;
 
-/// Reference to a vote in bulk storage
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct VoteRef {
-    /// Voter identity
-    pub voter: Identity,
-    /// Vote data
-    pub vote_data: VoteData,
-    /// Optional hash for verification
-    pub hash: Option<[u8; 32]>,
-}
+        // Create components
+        let bulk = BulkStore::new(db.clone());
+        let journal = EventJournal::new(db.clone());
 
-/// Trait for bulk storage of consensus artifacts
-pub trait BulkStore<Tr: Transaction>: Send + Sync {
-    /// Append a block to storage
-    fn append_block(&mut self, block: Arc<Signed<Block<Tr>>>) -> Result<BlockRef, String>;
+        let mut storage = Self { db, bulk, journal };
 
-    /// Append a QC to storage
-    fn append_qc(&mut self, qc: FinishedQC) -> Result<QCRef, String>;
+        // Store genesis objects
+        storage.store_genesis(genesis_block, genesis_qc)?;
 
-    /// Append a vote to storage
-    fn append_vote(&mut self, vote: Arc<ThreshPartial<VoteData>>) -> Result<VoteRef, String>;
+        Ok(storage)
+    }
 
-    /// Get a block by reference
-    fn get_block(&self, block_ref: &BlockRef) -> Result<Option<Arc<Signed<Block<Tr>>>>, String>;
+    /// Store the genesis block and QC
+    fn store_genesis(
+        &mut self,
+        genesis_block: Arc<Signed<Block<Tr>>>,
+        genesis_qc: FinishedQC,
+    ) -> Result<(), String> {
+        // Store genesis block
+        let (_, block_ref) = self.bulk.store_block(&genesis_block)?;
+        
+        // Store genesis QC
+        let qc_ref = self.bulk.store_qc(&genesis_qc)?;
 
-    /// Get a QC by reference
-    fn get_qc(&self, qc_ref: &QCRef) -> Result<Option<FinishedQC>, String>;
+        // Create block index entry
+        let tx = self
+            .db
+            .begin_write()
+            .map_err(|e| format!("Failed to begin write transaction: {:?}", e))?;
 
-    /// Get a vote by reference
-    fn get_vote(&self, vote_ref: &VoteRef) -> Result<Option<Arc<ThreshPartial<VoteData>>>, String>;
+        {
+            let mut block_index = tx
+                .open_table(tables::BLOCK_INDEX_TABLE)
+                .map_err(|e| format!("Failed to open block index table: {:?}", e))?;
+            
+            block_index
+                .insert(&GEN_BLOCK_KEY, &block_ref)
+                .map_err(|e| format!("Failed to insert genesis block index: {:?}", e))?;
+        }
+
+        {
+            let mut qc_index = tx
+                .open_table(tables::QC_INDEX_TABLE)
+                .map_err(|e| format!("Failed to open QC index table: {:?}", e))?;
+            
+            qc_index
+                .insert(&genesis_qc.data, &qc_ref)
+                .map_err(|e| format!("Failed to insert genesis QC index: {:?}", e))?;
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit transaction: {:?}", e))?;
+
+        Ok(())
+    }
+
+    /// Store a block from ProcessState
+    pub fn store_block(&mut self, block: &Arc<Signed<Block<Tr>>>) -> Result<(), String> {
+        // Store in bulk storage
+        let (_, block_ref) = self.bulk.store_block(block)?;
+
+        // Update indices
+        let tx = self
+            .db
+            .begin_write()
+            .map_err(|e| format!("Failed to begin write transaction: {:?}", e))?;
+
+        // Update block index
+        {
+            let mut block_index = tx
+                .open_table(tables::BLOCK_INDEX_TABLE)
+                .map_err(|e| format!("Failed to open block index table: {:?}", e))?;
+            
+            block_index
+                .insert(&block.data.key, &block_ref)
+                .map_err(|e| format!("Failed to insert block index: {:?}", e))?;
+        }
+
+        // Update view-based index
+        {
+            let mut view_blocks = tx
+                .open_table(tables::VIEW_BLOCKS_TABLE)
+                .map_err(|e| format!("Failed to open view blocks table: {:?}", e))?;
+            
+            let mut blocks_in_view = view_blocks
+                .get(&block.data.key.view)
+                .map_err(|e| format!("Failed to get view blocks: {:?}", e))?
+                .map(|v| v.value())
+                .unwrap_or_default();
+            
+            blocks_in_view.push(block.data.key.clone());
+            
+            view_blocks
+                .insert(&block.data.key.view, &blocks_in_view)
+                .map_err(|e| format!("Failed to insert view blocks: {:?}", e))?;
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit transaction: {:?}", e))?;
+
+        Ok(())
+    }
+
+    /// Store a QC from ProcessState
+    pub fn store_qc(&mut self, qc: &FinishedQC) -> Result<(), String> {
+        // Store in bulk storage
+        let qc_ref = self.bulk.store_qc(qc)?;
+
+        // Update QC index
+        let tx = self
+            .db
+            .begin_write()
+            .map_err(|e| format!("Failed to begin write transaction: {:?}", e))?;
+
+        {
+            let mut qc_index = tx
+                .open_table(tables::QC_INDEX_TABLE)
+                .map_err(|e| format!("Failed to open QC index table: {:?}", e))?;
+            
+            qc_index
+                .insert(&qc.data, &qc_ref)
+                .map_err(|e| format!("Failed to insert QC index: {:?}", e))?;
+        }
+
+        tx.commit()
+            .map_err(|e| format!("Failed to commit transaction: {:?}", e))?;
+
+        Ok(())
+    }
+
+    /// Get a block by key
+    pub fn get_block(&self, key: &BlockKey) -> Result<Option<Arc<Signed<Block<Tr>>>>, String> {
+        let tx = self
+            .db
+            .begin_read()
+            .map_err(|e| format!("Failed to begin read transaction: {:?}", e))?;
+
+        let block_index = tx
+            .open_table(tables::BLOCK_INDEX_TABLE)
+            .map_err(|e| format!("Failed to open block index table: {:?}", e))?;
+
+        match block_index.get(key).map_err(|e| format!("Failed to get block index: {:?}", e))? {
+            Some(block_ref) => self.bulk.get_block(&block_ref.value()),
+            None => Ok(None),
+        }
+    }
+
+    /// Get a QC by vote data
+    pub fn get_qc(&self, vote_data: &VoteData) -> Result<Option<FinishedQC>, String> {
+        let tx = self
+            .db
+            .begin_read()
+            .map_err(|e| format!("Failed to begin read transaction: {:?}", e))?;
+
+        let qc_index = tx
+            .open_table(tables::QC_INDEX_TABLE)
+            .map_err(|e| format!("Failed to open QC index table: {:?}", e))?;
+
+        match qc_index.get(vote_data).map_err(|e| format!("Failed to get QC index: {:?}", e))? {
+            Some(qc_ref) => self.bulk.get_qc(&qc_ref.value()),
+            None => Ok(None),
+        }
+    }
 
     /// Get all blocks in a view
-    fn get_blocks_in_view(&self, view: ViewNum) -> Result<Vec<BlockRef>, String>;
+    pub fn get_blocks_in_view(&self, view: ViewNum) -> Result<Vec<BlockKey>, String> {
+        let tx = self
+            .db
+            .begin_read()
+            .map_err(|e| format!("Failed to begin read transaction: {:?}", e))?;
 
-    /// Get all QCs for blocks in a view
-    fn get_qcs_in_view(&self, view: ViewNum) -> Result<Vec<QCRef>, String>;
-}
+        let view_blocks = tx
+            .open_table(tables::VIEW_BLOCKS_TABLE)
+            .map_err(|e| format!("Failed to open view blocks table: {:?}", e))?;
 
-/// Lightweight consensus state that references bulk storage
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ConsensusState {
-    /// Current view
-    pub current_view: ViewNum,
-
-    /// Current phase
-    pub current_phase: Phase,
-
-    /// View entry time
-    pub view_entry_time: u128,
-
-    /// Tips of the DAG (as QC references)
-    pub tips: Vec<QCRef>,
-
-    /// Maximum 1-QC seen
-    pub max_1qc: QCRef,
-
-    /// Finalized blocks (as references)
-    pub finalized_blocks: im::HashSet<BlockRef>,
-
-    /// Unfinalized QCs by block
-    pub unfinalized_qcs: im::HashMap<BlockRef, im::HashSet<QCRef>>,
-
-    /// Leader blocks by view
-    pub leader_blocks_by_view: im::HashMap<ViewNum, im::HashSet<BlockRef>>,
-
-    /// Unfinalized leader blocks by view
-    pub unfinalized_leader_by_view: im::HashMap<ViewNum, im::HashSet<BlockRef>>,
-}
-
-/// State root is a hash of the consensus state
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct StateRoot(pub [u8; 32]);
-
-/// Trait for snapshot storage
-pub trait SnapshotStore: Send + Sync {
-    /// Save a snapshot of the consensus state
-    fn save_snapshot(&mut self, state: &ConsensusState) -> Result<StateRoot, String>;
-
-    /// Load a snapshot by its root
-    fn load_snapshot(&self, root: &StateRoot) -> Result<Option<ConsensusState>, String>;
-
-    /// Get the latest snapshot
-    fn get_latest_snapshot(&self) -> Result<Option<(StateRoot, ConsensusState)>, String>;
-
-    /// List all snapshot roots in order (oldest to newest)
-    fn list_snapshots(&self) -> Result<Vec<StateRoot>, String>;
-
-    /// Prune old snapshots, keeping at least `keep_count` most recent
-    fn prune_snapshots(&mut self, keep_count: usize) -> Result<usize, String>;
-}
-
-/// Runtime configuration for storage invariant checking
-#[derive(Debug, Clone, Default)]
-pub struct InvariantCheckConfig {
-    /// Whether to check cache consistency with bulk storage
-    pub check_cache_consistency: bool,
-    /// Whether to check snapshot consistency with bulk storage
-    pub check_snapshot_consistency: bool,
-    /// Whether to check view index consistency
-    pub check_view_index_consistency: bool,
-    /// Whether to check DAG consistency
-    pub check_dag_consistency: bool,
-    /// Whether to check finalization invariants
-    pub check_finalization_invariants: bool,
-}
-
-impl InvariantCheckConfig {
-    /// Create a paranoid configuration that checks everything
-    pub fn paranoid() -> Self {
-        Self {
-            check_cache_consistency: true,
-            check_snapshot_consistency: true,
-            check_view_index_consistency: true,
-            check_dag_consistency: true,
-            check_finalization_invariants: true,
-        }
-    }
-
-    /// Create a debug configuration with basic checks
-    pub fn debug() -> Self {
-        Self {
-            check_cache_consistency: true,
-            check_snapshot_consistency: false,
-            check_view_index_consistency: true,
-            check_dag_consistency: true,
-            check_finalization_invariants: false,
-        }
+        Ok(view_blocks
+            .get(&view)
+            .map_err(|e| format!("Failed to get view blocks: {:?}", e))?
+            .map(|v| v.value())
+            .unwrap_or_default())
     }
 }
 
-/// Storage invariants that should be maintained
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StorageInvariant {
-    /// All blocks referenced in view cache should exist in bulk storage
-    BlockInCacheButNotInBulk { key: BlockKey },
-
-    /// All QCs referenced in view cache should exist in bulk storage
-    QcInCacheButNotInBulk { vote_data: VoteData },
-
-    /// All votes referenced in view cache should exist in bulk storage
-    VoteInCacheButNotInBulk {
-        voter: Identity,
-        vote_data: VoteData,
-    },
-
-    /// All blocks in snapshot state should exist in bulk storage
-    BlockInSnapshotButNotInBulk { key: BlockKey },
-
-    /// All QCs in snapshot state should exist in bulk storage
-    QcInSnapshotButNotInBulk { vote_data: VoteData },
-
-    /// View index should be consistent with actual stored items
-    ViewIndexInconsistent {
-        view: ViewNum,
-        expected_blocks: usize,
-        actual_blocks: usize,
-    },
-
-    /// DAG parent-child relationships should be consistent
-    DagRelationshipInconsistent { parent: BlockKey, child: BlockKey },
-
-    /// Tips should be maximal (not observed by any other QC)
-    TipNotMaximal {
-        tip: VoteData,
-        observed_by: VoteData,
-    },
-
-    /// All finalized blocks should have 2-QCs
-    FinalizedBlockWithout2QC { key: BlockKey },
-
-    /// Snapshot state should be internally consistent
-    SnapshotStateInconsistent { description: String },
-}
-
-/// Storage invariant checker
-#[derive(Debug, Clone)]
-pub struct InvariantChecker {
-    pub config: InvariantCheckConfig,
-}
-
-impl InvariantChecker {
-    pub fn new(config: InvariantCheckConfig) -> Self {
-        Self { config }
-    }
-
-    /// Check all configured invariants
-    pub fn check_invariants<Tr: Transaction, B: BulkStore<Tr>, S: SnapshotStore>(
-        &self,
-        bulk_store: &B,
-        snapshot_store: &S,
-        view_cache: &ViewCache<Tr>,
-        consensus_state: &ConsensusState,
-    ) -> Vec<StorageInvariant> {
-        let mut violations = Vec::new();
-
-        if self.config.check_cache_consistency {
-            self.check_cache_consistency(bulk_store, view_cache, &mut violations);
-        }
-
-        if self.config.check_snapshot_consistency {
-            self.check_snapshot_consistency(
-                bulk_store,
-                snapshot_store,
-                consensus_state,
-                &mut violations,
-            );
-        }
-
-        if self.config.check_view_index_consistency {
-            self.check_view_index_consistency(
-                bulk_store,
-                consensus_state.current_view,
-                &mut violations,
-            );
-        }
-
-        if self.config.check_dag_consistency {
-            self.check_dag_consistency(bulk_store, view_cache, &mut violations);
-        }
-
-        if self.config.check_finalization_invariants {
-            self.check_finalization_invariants(consensus_state, &mut violations);
-        }
-
-        violations
-    }
-
-    fn check_cache_consistency<Tr: Transaction, B: BulkStore<Tr>>(
-        &self,
-        bulk_store: &B,
-        cache: &ViewCache<Tr>,
-        violations: &mut Vec<StorageInvariant>,
-    ) {
-        // Check all cached blocks exist in bulk storage
-        for (key, _) in &cache.blocks {
-            let block_ref = BlockRef {
-                key: key.clone(),
-                hash: key.hash.clone(),
-            };
-
-            match bulk_store.get_block(&block_ref) {
-                Ok(None) => {
-                    violations
-                        .push(StorageInvariant::BlockInCacheButNotInBulk { key: key.clone() });
-                }
-                Err(e) => {
-                    tracing::warn!("Error checking block in bulk storage: {}", e);
-                }
-                _ => {}
-            }
-        }
-
-        // Check all cached QCs exist in bulk storage
-        for qc in cache.qcs.values() {
-            let qc_ref = QCRef {
-                vote_data: qc.data.clone(),
-                hash: None,
-            };
-
-            match bulk_store.get_qc(&qc_ref) {
-                Ok(None) => {
-                    violations.push(StorageInvariant::QcInCacheButNotInBulk {
-                        vote_data: qc.data.clone(),
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!("Error checking QC in bulk storage: {}", e);
-                }
-                _ => {}
-            }
-        }
-
-        // Check all cached votes exist in bulk storage
-        for (vote_data, votes) in &cache.votes {
-            for (voter, _vote) in votes {
-                let vote_ref = VoteRef {
-                    voter: voter.clone(),
-                    vote_data: vote_data.clone(),
-                    hash: None,
-                };
-
-                match bulk_store.get_vote(&vote_ref) {
-                    Ok(None) => {
-                        violations.push(StorageInvariant::VoteInCacheButNotInBulk {
-                            voter: voter.clone(),
-                            vote_data: vote_data.clone(),
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!("Error checking vote in bulk storage: {}", e);
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    fn check_snapshot_consistency<Tr: Transaction, B: BulkStore<Tr>, S: SnapshotStore>(
-        &self,
-        bulk_store: &B,
-        _snapshot_store: &S,
-        consensus_state: &ConsensusState,
-        violations: &mut Vec<StorageInvariant>,
-    ) {
-        // Check all blocks referenced in consensus state exist
-        for block_ref in &consensus_state.finalized_blocks {
-            match bulk_store.get_block(block_ref) {
-                Ok(None) => {
-                    violations.push(StorageInvariant::BlockInSnapshotButNotInBulk {
-                        key: block_ref.key.clone(),
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!("Error checking snapshot block in bulk storage: {}", e);
-                }
-                _ => {}
-            }
-        }
-
-        // Check tips exist
-        for tip_ref in &consensus_state.tips {
-            match bulk_store.get_qc(tip_ref) {
-                Ok(None) => {
-                    violations.push(StorageInvariant::QcInSnapshotButNotInBulk {
-                        vote_data: tip_ref.vote_data.clone(),
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!("Error checking tip QC in bulk storage: {}", e);
-                }
-                _ => {}
-            }
-        }
-
-        // Check internal consistency
-        if consensus_state.current_view.0 < 0 && consensus_state.current_view != ViewNum(0) {
-            violations.push(StorageInvariant::SnapshotStateInconsistent {
-                description: format!("Invalid current view: {:?}", consensus_state.current_view),
-            });
-        }
-    }
-
-    fn check_view_index_consistency<Tr: Transaction, B: BulkStore<Tr>>(
-        &self,
-        bulk_store: &B,
-        current_view: ViewNum,
-        violations: &mut Vec<StorageInvariant>,
-    ) {
-        // Check recent views
-        for i in -5..=0 {
-            let view = ViewNum(current_view.0.saturating_add(i));
-
-            if let Ok(blocks_in_view) = bulk_store.get_blocks_in_view(view) {
-                // Verify each block actually exists
-                let mut actual_count = 0;
-                for block_ref in &blocks_in_view {
-                    if let Ok(Some(_)) = bulk_store.get_block(block_ref) {
-                        actual_count += 1;
-                    }
-                }
-
-                if actual_count != blocks_in_view.len() {
-                    violations.push(StorageInvariant::ViewIndexInconsistent {
-                        view,
-                        expected_blocks: blocks_in_view.len(),
-                        actual_blocks: actual_count,
-                    });
-                }
-            }
-        }
-    }
-
-    fn check_dag_consistency<Tr: Transaction, B: BulkStore<Tr>>(
-        &self,
-        bulk_store: &B,
-        cache: &ViewCache<Tr>,
-        violations: &mut Vec<StorageInvariant>,
-    ) {
-        // For each block, verify parent-child relationships
-        for (key, block) in &cache.blocks {
-            for prev_qc in &block.data.prev {
-                // Check if the parent block exists
-                let parent_ref = BlockRef {
-                    key: prev_qc.data.for_which.clone(),
-                    hash: prev_qc.data.for_which.hash.clone(),
-                };
-
-                if let Ok(None) = bulk_store.get_block(&parent_ref) {
-                    violations.push(StorageInvariant::DagRelationshipInconsistent {
-                        parent: prev_qc.data.for_which.clone(),
-                        child: key.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    fn check_finalization_invariants(
-        &self,
-        consensus_state: &ConsensusState,
-        _violations: &mut Vec<StorageInvariant>,
-    ) {
-        // Check that all finalized blocks should have implied 2-QCs
-        // This is a simplified check - in reality we'd need to traverse the QC structure
-        for block_ref in &consensus_state.finalized_blocks {
-            // For now, just check that it's not a genesis block
-            if block_ref.key != GEN_BLOCK_KEY {
-                // TODO: critical!
-                // In a real implementation, we'd check for the existence of a 2-QC
-            }
-        }
-
-        // Check tips are maximal
-        for (i, _tip1) in consensus_state.tips.iter().enumerate() {
-            for (j, _tip2) in consensus_state.tips.iter().enumerate() {
-                if i != j {
-                    // In a real implementation, we'd check if tip1 observes tip2
-                    // TODO: critical!
-                }
-            }
-        }
-    }
-}
-
-/// Helper function to log invariant violations
-pub fn log_invariant_violations(violations: &[StorageInvariant], process_id: &Identity) {
-    if !violations.is_empty() {
-        tracing::error!(
-            target: "storage_invariants",
-            process = ?process_id,
-            violation_count = violations.len(),
-            "Storage invariant violations detected"
-        );
-
-        for violation in violations {
-            tracing::error!(
-                target: "storage_invariants",
-                process = ?process_id,
-                violation = ?violation,
-                "Storage invariant violation"
-            );
-        }
-    }
-}
+/// Storage checkpoint - minimal data needed for recovery
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StorageCheckpoint {
+    pub snapshot_id: u64,
+    pub event_count: u64,
+} 
