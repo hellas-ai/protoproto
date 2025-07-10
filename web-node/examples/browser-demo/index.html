@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hellas Node Browser Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .status {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .ticket {
+            background: #e8f5e9;
+            padding: 10px;
+            border-radius: 4px;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .tx-form {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hellas Node Browser Demo</h1>
+        
+        <div id="status" class="status">Loading WASM module...</div>
+        
+        <h2>Network Controls</h2>
+        <button id="startBtn" disabled>Start New Network</button>
+        <button id="joinBtn" disabled>Join Network</button>
+        
+        <div id="ticket" class="ticket" style="display: none;">
+            <strong>Network Ticket:</strong><br>
+            <span id="ticketValue"></span>
+        </div>
+        
+        <div id="joinForm" style="display: none;">
+            <input type="text" id="ticketInput" placeholder="Enter network ticket">
+            <button id="connectBtn">Connect</button>
+        </div>
+        
+        <h2>Submit Transaction</h2>
+        <div class="tx-form">
+            <input type="text" id="fromKey" placeholder="Signing key (hex)">
+            <input type="text" id="toAddress" placeholder="Recipient object ID (hex)">
+            <input type="number" id="amount" placeholder="Amount">
+            <input type="number" id="nonce" placeholder="Nonce">
+            <button id="submitTx" disabled>Submit Transaction</button>
+        </div>
+        
+        <h2>Node Status</h2>
+        <div id="nodeStatus" class="status">Not connected</div>
+        
+        <div id="error" class="error" style="display: none;"></div>
+    </div>
+
+    <script type="module">
+        import init, { 
+            init_hellas_node, 
+            join_hellas_network, 
+            submit_transaction,
+            get_node_status 
+        } from './pkg/web_node.js';
+
+        let statusInterval;
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        async function updateStatus() {
+            try {
+                const status = await get_node_status();
+                document.getElementById('nodeStatus').textContent = JSON.stringify(status, null, 2);
+            } catch (e) {
+                document.getElementById('nodeStatus').textContent = 'Not connected';
+            }
+        }
+
+        async function startNetwork() {
+            try {
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('status').textContent = 'Starting new network...';
+                
+                const ticket = await init_hellas_node();
+                
+                document.getElementById('ticketValue').textContent = ticket;
+                document.getElementById('ticket').style.display = 'block';
+                document.getElementById('status').textContent = 'Network started!';
+                document.getElementById('submitTx').disabled = false;
+                
+                // Start status updates
+                statusInterval = setInterval(updateStatus, 2000);
+                updateStatus();
+            } catch (e) {
+                showError('Failed to start network: ' + e);
+                document.getElementById('startBtn').disabled = false;
+            }
+        }
+
+        async function joinNetwork() {
+            const ticket = document.getElementById('ticketInput').value;
+            if (!ticket) {
+                showError('Please enter a network ticket');
+                return;
+            }
+            
+            try {
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('status').textContent = 'Joining network...';
+                
+                const nodeId = await join_hellas_network(ticket);
+                
+                document.getElementById('status').textContent = 'Connected! Node ID: ' + nodeId;
+                document.getElementById('joinForm').style.display = 'none';
+                document.getElementById('submitTx').disabled = false;
+                
+                // Start status updates
+                statusInterval = setInterval(updateStatus, 2000);
+                updateStatus();
+            } catch (e) {
+                showError('Failed to join network: ' + e);
+                document.getElementById('connectBtn').disabled = false;
+            }
+        }
+
+        async function submitTx() {
+            const fromKey = document.getElementById('fromKey').value;
+            const toAddress = document.getElementById('toAddress').value;
+            const amount = BigInt(document.getElementById('amount').value || '0');
+            const nonce = BigInt(document.getElementById('nonce').value || '0');
+            
+            if (!fromKey || !toAddress) {
+                showError('Please fill in all transaction fields');
+                return;
+            }
+            
+            try {
+                document.getElementById('submitTx').disabled = true;
+                const txHash = await submit_transaction(fromKey, toAddress, amount, nonce);
+                alert('Transaction submitted! Hash: ' + txHash);
+            } catch (e) {
+                showError('Failed to submit transaction: ' + e);
+            } finally {
+                document.getElementById('submitTx').disabled = false;
+            }
+        }
+
+        async function main() {
+            try {
+                // Initialize WASM module
+                await init();
+                
+                document.getElementById('status').textContent = 'WASM module loaded!';
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('joinBtn').disabled = false;
+                
+                // Set up event handlers
+                document.getElementById('startBtn').addEventListener('click', startNetwork);
+                document.getElementById('joinBtn').addEventListener('click', () => {
+                    document.getElementById('joinForm').style.display = 'block';
+                });
+                document.getElementById('connectBtn').addEventListener('click', joinNetwork);
+                document.getElementById('submitTx').addEventListener('click', submitTx);
+                
+            } catch (e) {
+                showError('Failed to initialize WASM: ' + e);
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html> 

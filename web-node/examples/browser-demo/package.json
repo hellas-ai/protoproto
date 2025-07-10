@@ -1,0 +1,16 @@
+{
+  "name": "hellas-browser-demo",
+  "version": "1.0.0",
+  "description": "Browser demo for Hellas blockchain node",
+  "scripts": {
+    "build": "cd ../.. && wasm-pack build --target web",
+    "serve": "python3 -m http.server 8080"
+  },
+  "keywords": [
+    "hellas",
+    "blockchain",
+    "wasm",
+    "browser"
+  ],
+  "license": "MIT"
+} 

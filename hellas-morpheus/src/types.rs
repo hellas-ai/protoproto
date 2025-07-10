@@ -1,12 +1,10 @@
+use crate::Transaction;
 use crate::crypto::*;
 use crate::format;
-use crate::Transaction;
 
-use ark_serialize::CompressedChecked;
 use ark_serialize::Valid;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -67,13 +65,6 @@ impl CanonicalDeserialize for BlockType {
     CanonicalDeserialize,
 )]
 pub struct ViewNum(pub i64);
-
-impl Display for ViewNum {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 impl ViewNum {
     pub fn incr(&self) -> Self {
         ViewNum(self.0 + 1)
@@ -95,13 +86,6 @@ impl ViewNum {
     CanonicalDeserialize,
 )]
 pub struct SlotNum(pub u64);
-
-impl Display for SlotNum {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 impl SlotNum {
     pub fn is_pred(&self, other: SlotNum) -> bool {
         self.0 + 1 == other.0
@@ -141,7 +125,7 @@ pub struct BlockHash(pub u64);
 pub struct BlockKey {
     pub type_: BlockType,
     pub view: ViewNum,
-    pub height: u64,
+    pub height: usize,
     pub author: Option<Identity>, // TODO: refactor genesis handling to make this mandatory
     pub slot: SlotNum,
     pub hash: Option<BlockHash>,
@@ -224,14 +208,9 @@ pub struct StartView {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(
-    from = "CompressedChecked<BlockData<Tr>>",
-    into = "CompressedChecked<BlockData<Tr>>"
-)]
-pub enum BlockData<Tr: Transaction> {
+pub enum BlockData<Tr> {
     Genesis,
     Tr {
-        #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
         transactions: Vec<Tr>,
     },
     Lead {
@@ -239,13 +218,7 @@ pub enum BlockData<Tr: Transaction> {
     },
 }
 
-impl<Tr: Transaction> From<CompressedChecked<BlockData<Tr>>> for BlockData<Tr> {
-    fn from(c: CompressedChecked<BlockData<Tr>>) -> Self {
-        c.0
-    }
-}
-
-impl<Tr: Transaction> CanonicalSerialize for BlockData<Tr> {
+impl<Tr: CanonicalSerialize> CanonicalSerialize for BlockData<Tr> {
     fn serialize_with_mode<W: std::io::Write>(
         &self,
         mut writer: W,
@@ -273,13 +246,13 @@ impl<Tr: Transaction> CanonicalSerialize for BlockData<Tr> {
     }
 }
 
-impl<Tr: Transaction> Valid for BlockData<Tr> {
+impl<Tr: Sync> Valid for BlockData<Tr> {
     fn check(&self) -> Result<(), ark_serialize::SerializationError> {
         Ok(())
     }
 }
 
-impl<Tr: Transaction> CanonicalDeserialize for BlockData<Tr> {
+impl<Tr: CanonicalDeserialize> CanonicalDeserialize for BlockData<Tr> {
     fn deserialize_with_mode<R: std::io::Read>(
         mut reader: R,
         compress: ark_serialize::Compress,
@@ -315,7 +288,6 @@ pub struct Block<Tr: Transaction> {
     pub key: BlockKey,
     pub prev: Vec<FinishedQC>,
     pub one: FinishedQC,
-    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     pub data: BlockData<Tr>,
 }
 
@@ -327,7 +299,6 @@ impl<Tr: Transaction> std::fmt::Debug for Block<Tr> {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Ord, Serialize, Deserialize)]
 pub enum Message<Tr: Transaction> {
-    #[serde(bound(serialize = "Tr: Transaction", deserialize = "Tr: Transaction"))]
     Block(Arc<Signed<Block<Tr>>>),
     NewVote(Arc<ThreshPartial<VoteData>>),
     QC(FinishedQC),
@@ -342,7 +313,7 @@ impl<Tr: Transaction> std::fmt::Debug for Message<Tr> {
     }
 }
 
-#[derive(Copy, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Phase {
     High = 0,
     Low = 1,

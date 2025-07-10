@@ -1,50 +1,25 @@
 [package]
 name = "hellas-morpheus"
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[lib]
-name = "hellas_morpheus"
-# "cdylib" is for Python
-# "rlib" is for Rust
-crate-type = ["cdylib", "rlib"]
+edition = "2024"
 
 [dependencies]
-ark-bls12-381 = { version = "0.5.0", features = ["curve"] }
-ark-ec = { version = "0.5.0", features = [] }
-ark-ff = { version = "0.5.0" }
-ark-serialize = { version = "0.5.0", features = ["derive", "serde_with"] }
-ark-std = { version = "0.5.0" }
-blake3 = "1.5.1"
-crossbeam = "0.8.4"
-derivative = "2.2.0"
-derive_more = { version = "1.0", features = ["debug", "display"] }
-rand = "0.8.5"
-rand_core = "0.6.4"
-redb = "2.1.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.127"
-serde_with = "3.12"
-thiserror = "1.0.57"
-postcard = { version = "1.0.8", features = ["use-std"] }
-tracing = "0.1.40"
-test-log = "0.2.16"
-env_logger = "0.11.5"
-fastbloom = "0.9.0"
-human_bytes = "0.4.3"
-itertools = "0.13.0"
-im = { version = "15.1.0", features = ["serde"] }
+hints = { path = "../hints" }
 
-[dependencies.hints]
-path = "../hints"
+ark-std = "0.5.0"
+ark-serialize = { version = "0.5.0", features = [ "serde_with" ] }
+ark-serialize-derive = { version = "0.5.0" }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json_any_key = "2"
+
+tracing = "0.1"
+
+time = { version = "0.3.39", features = ["serde"] }
+test-log = { version = "0.2", features = ["trace"] }
 
 [dev-dependencies]
-test-log = "0.2.16"
-ark-std = { version = "0.5.0", features = ["print-trace"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["parallel"]
-parallel = ["ark-ff/parallel", "ark-ec/parallel", "ark-std/parallel"]
-test = []

@@ -18,21 +18,31 @@
 //!
 //! ## Implementation Structure
 //!
-//! - `process.rs`: Defines the core `MorpheusProcess` struct with component-based architecture
-//! - `processor.rs`: Implements pure functional action processing
-//! - `effects.rs`: Defines state mutation effects
-//! - `actions.rs`: Defines external action types
+//! - `process.rs`: Defines the core `MorpheusProcess` struct and message handling
+//! - `block_production.rs`: Implements block creation logic
 //! - `state_tracking.rs`: Manages protocol state (blocks, QCs, DAG structure)
 //! - `types.rs`: Defines protocol data types
-//! - `test_harness.rs`: Testing framework for the protocol
+//! - `mock_harness.rs`: Testing framework for the protocol
 //! - `tracing_setup.rs`: Structured logging with tracing-rs
+//! - `hades/`: Web-based visualization and debugging interface
+//!
+//! ## Key Protocol Concepts
+//!
+//! - **Quorum Certificates (QCs)**: Proofs that n-f processes have voted for a block
+//! - **z-votes**: Votes at different levels (0, 1, 2) for blocks
+//! - **Observes relation**: Defines the DAG structure and block ordering
+//! - **View changes**: Allow progress when a leader is faulty
 
-mod config;
+mod block_production;
+mod block_validation;
 mod crypto;
-mod logic;
+mod invariants;
+mod message_handling;
 mod process;
-mod storage;
+mod state_tracking;
 mod types;
+mod view_management;
+mod voting;
 
 pub mod format;
 pub mod test_harness;
@@ -41,27 +51,15 @@ pub mod tracing_setup;
 use std::{fmt::Debug, hash::Hash};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
-
+pub use block_validation::BlockValidationError;
 pub use crypto::*;
-pub use logic::*;
+pub use invariants::InvariantViolation;
 pub use process::*;
-pub use storage::*;
+pub use state_tracking::{PendingVotes, StateIndex};
 pub use types::*;
+pub use voting::*;
 
 pub trait Transaction:
-    Send
-    + Sync
-    + Clone
-    + Default
-    + Eq
-    + Ord
-    + Hash
-    + Valid
-    + CanonicalDeserialize
-    + CanonicalSerialize
-    + Debug
-    + serde::Serialize
-    + for<'de> serde::Deserialize<'de>
-    + 'static
+    Sync + Clone + Eq + Ord + Hash + Valid + CanonicalDeserialize + CanonicalSerialize + Debug
 {
 }
