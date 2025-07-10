@@ -43,7 +43,7 @@ fn can_produce_tr_block<Tr: Transaction>(state: &ProcessState<Tr>) -> bool {
             .as_ref()
             .map(|qc| qc.data.for_which.slot.is_pred(slot))
             .unwrap_or(false);
-        
+
         has_prev_slot_qc && has_transactions
     } else {
         has_transactions
@@ -72,7 +72,12 @@ fn can_produce_lead_block<Tr: Transaction>(
             .map(|qc| qc.data.for_which.slot.is_pred(slot))
             .unwrap_or(false)
     } else {
-        has_enough_start_views(state, view, n, f)
+        // In view 0, don't require start view messages since it's the initial view
+        if view == ViewNum(0) {
+            true
+        } else {
+            has_enough_start_views(state, view, n, f)
+        }
     }
 }
 
@@ -156,6 +161,8 @@ fn produce_tr_block<Tr: Transaction>(
 
     let signed_block = Arc::new(Signed::from_data(block, kb));
 
+    let vote = make_vote(kb, 0, &block_key);
+
     let effects = vec![
         Effect::BlockProduced {
             block: signed_block.clone(),
@@ -166,6 +173,10 @@ fn produce_tr_block<Tr: Transaction>(
         Effect::SlotAdvanced {
             slot_type: BlockType::Tr,
             new_slot: SlotNum(slot.0 + 1),
+        },
+        Effect::VoteRecorded {
+            voter: id.clone(),
+            vote: vote.clone(),
         },
     ];
 

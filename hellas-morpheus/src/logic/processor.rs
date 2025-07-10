@@ -193,7 +193,7 @@ pub(crate) fn validate_block<Tr: Transaction>(
 pub(crate) fn find_maximal_unfinalized<Tr: Transaction>(
     state: &ProcessState<Tr>,
 ) -> Option<&FinishedQC> {
-    state.unfinalized_2qc.iter().max_by(|a, b| {
+    state.unfinalized_qcs.values().flat_map(|v| v.iter()).max_by(|a, b| {
         if state.observes(&a.data, &b.data) {
             std::cmp::Ordering::Greater
         } else if state.observes(&b.data, &a.data) {

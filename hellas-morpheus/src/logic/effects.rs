@@ -114,13 +114,19 @@ pub enum Effect<Tr: Transaction> {
         target: Identity,
     },
 
-    /// Pending vote marked as processed
+    /// Marked that a pending vote was processed
     PendingVoteProcessed {
         view: ViewNum,
         vote_type: u8,
         block_type: BlockType,
         block_key: BlockKey,
     },
+
+    /// Clear the dirty flag for pending votes after processing
+    PendingVotesDirtyCleared { view: ViewNum },
+
+    /// Mark that we sent a 0-QC for a block
+    ZeroQcSent { block_key: BlockKey },
 }
 
 impl<Tr: Transaction> Effect<Tr> {
@@ -234,6 +240,12 @@ impl<Tr: Transaction> Effect<Tr> {
                     "Processed pending {}-vote for {:?} block {:?} in view {}",
                     vote_type, block_type, block_key, view.0
                 )
+            }
+            Effect::PendingVotesDirtyCleared { view } => {
+                format!("Cleared dirty flag for pending votes in view {}", view.0)
+            }
+            Effect::ZeroQcSent { block_key } => {
+                format!("Sent 0-QC for block {:?}", block_key)
             }
         }
     }

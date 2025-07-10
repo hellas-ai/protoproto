@@ -33,12 +33,7 @@ pub struct MorpheusProcess<Tr: Transaction> {
 
 impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// Create a new process
-    pub fn new(
-        keybook: KeyBook,
-        id: Identity,
-        n: u32,
-        f: u32,
-    ) -> Result<Self, String> {
+    pub fn new(keybook: KeyBook, id: Identity, n: u32, f: u32) -> Result<Self, String> {
         // Create genesis block and QC
         let genesis_block = Arc::new(Signed {
             data: Block {
@@ -196,11 +191,17 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
                 if self.state.max_view.0 > self.state.current_view {
                     // Need to catch up to the max view we've seen
                     new_effects.extend(
-                        trigger_view_change(&self.state, self.state.max_view.0, &self.id, self.n, &self.kb)
-                            .map_err(|e| format!("Triggering view change from max_view: {}", e))?,
+                        trigger_view_change(
+                            &self.state,
+                            self.state.max_view.0,
+                            &self.id,
+                            self.n,
+                            &self.kb,
+                        )
+                        .map_err(|e| format!("Triggering view change from max_view: {}", e))?,
                     );
                 }
-                
+
                 // Then check pending votes
                 new_effects.extend(
                     check_pending_votes(&self.state, &self.kb, &self.id, self.n)
@@ -248,12 +249,21 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             // End-view vote recorded - check if we can form a view certificate
             Effect::EndViewRecorded { view, .. } => {
                 // Check if we can form a view certificate
-                if let Ok(Some(cert)) = check_view_cert_formation(&self.state, *view, &self.kb, self.n, self.f) {
+                if let Ok(Some(cert)) =
+                    check_view_cert_formation(&self.state, *view, &self.kb, self.n, self.f)
+                {
                     new_effects.push(Effect::ViewCertFormed { cert: cert.clone() });
                     // Also process the certificate to trigger view change
                     new_effects.extend(
-                        process_end_view_cert(&self.state, &cert, &self.kb, &self.id, self.n, self.f)
-                            .map_err(|e| format!("Processing end-view cert: {}", e))?,
+                        process_end_view_cert(
+                            &self.state,
+                            &cert,
+                            &self.kb,
+                            &self.id,
+                            self.n,
+                            self.f,
+                        )
+                        .map_err(|e| format!("Processing end-view cert: {}", e))?,
                     );
                 }
             }
@@ -275,11 +285,17 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             Effect::QuorumReached { qc_formed } => {
                 // Check if we need to broadcast the QC
                 if let Some(author) = &qc_formed.data.for_which.author {
-                    // For 0-QCs, only broadcast if it's our own block
-                    if qc_formed.data.z == 0 && author == &self.id {
+                    // For 0-QCs, only broadcast if it's our own block and we haven't sent it yet
+                    if author == &self.id
+                        && qc_formed.data.z == 0
+                        && !self.state.zero_qcs_sent.contains(&qc_formed.data.for_which)
+                    {
                         new_effects.push(Effect::MessageSent {
                             message: Message::QC(qc_formed.clone()),
                             target: None,
+                        });
+                        new_effects.push(Effect::ZeroQcSent {
+                            block_key: qc_formed.data.for_which.clone(),
                         });
                     }
                 }

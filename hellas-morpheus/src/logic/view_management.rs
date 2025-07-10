@@ -84,6 +84,11 @@ pub(crate) fn process_start_view<Tr: Transaction>(
         });
     }
 
+    // Check that the QC is a 1-QC (as in original implementation)
+    if start_view.data.qc.data.z != 1 {
+        return Ok(effects); // Not an error, just ignore non-1-QCs
+    }
+
     // Only the leader should receive start view messages
     if leader(start_view.data.view, n) != *id {
         return Ok(effects);
@@ -127,8 +132,13 @@ pub(crate) fn check_timeouts_effects<Tr: Transaction>(
         // Create end-view vote
         let vote = Arc::new(ThreshPartial::from_data(state.current_view, kb));
         effects.push(Effect::MessageSent {
-            message: Message::EndView(vote),
+            message: Message::EndView(vote.clone()),
             target: None,
+        });
+        effects.push(Effect::EndViewRecorded {
+            voter: id.clone(),
+            view: state.current_view,
+            vote: vote.clone(),
         });
     }
 

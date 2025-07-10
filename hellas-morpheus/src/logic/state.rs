@@ -177,6 +177,10 @@ impl<Tr: Transaction> ProcessState<Tr> {
         match effect {
             Effect::TimeUpdated(_) => {}
             _ => {
+                tracing::debug!(
+                    target: "apply",
+                    effect = ?effect,
+                );
             }
         }
         match effect {
@@ -266,13 +270,15 @@ impl<Tr: Transaction> ProcessState<Tr> {
             }
 
             Effect::StartViewRecorded {
-                sender: _,
+                sender,
                 start_view,
             } => {
                 self.start_views
                     .entry(start_view.data.view)
                     .or_default()
                     .push(start_view.clone());
+
+                self.insert_qc(&start_view.data.qc, &sender);
             }
 
             Effect::ComplaintSent { qc, .. } => {
@@ -302,6 +308,16 @@ impl<Tr: Transaction> ProcessState<Tr> {
                         _ => {}
                     }
                 }
+            }
+
+            Effect::PendingVotesDirtyCleared { view } => {
+                if let Some(pending) = self.pending_votes.get_mut(view) {
+                    pending.dirty = false;
+                }
+            }
+
+            Effect::ZeroQcSent { block_key } => {
+                self.zero_qcs_sent.insert(block_key.clone());
             }
 
             Effect::MessageSent { .. } => {}
@@ -401,7 +417,7 @@ impl<Tr: Transaction> ProcessState<Tr> {
             if author == process_id {
                 match qc.data.for_which.type_ {
                     BlockType::Lead => {
-                        if qc.data.for_which.slot.is_pred(self.slot_lead) {
+                        if self.slot_lead.is_pred(qc.data.for_which.slot) {
                             self.latest_leader_qc = Some(qc.clone());
                             if qc.data.z == 1 {
                                 self.latest_leader_1qc = Some(qc.clone());
@@ -409,7 +425,7 @@ impl<Tr: Transaction> ProcessState<Tr> {
                         }
                     }
                     BlockType::Tr => {
-                        if qc.data.for_which.slot.is_pred(self.slot_tr) {
+                        if self.slot_tr.is_pred(qc.data.for_which.slot) {
                             self.latest_tr_qc = Some(qc.clone());
                         }
                     }

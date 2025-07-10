@@ -57,6 +57,13 @@ pub(crate) fn check_pending_votes<Tr: Transaction>(
     let current_view = state.current_view;
     let mut current_phase = state.current_phase;
 
+    // Check if pending votes for current view need re-evaluation (optimization from original)
+    if let Some(pending) = state.pending_votes.get(&current_view) {
+        if !pending.dirty {
+            return Ok(effects); // Nothing changed, skip re-evaluation
+        }
+    }
+
     // Track votes sent in this pass to avoid duplicates
     let mut votes_sent_this_pass = std::collections::HashSet::new();
 
@@ -67,21 +74,16 @@ pub(crate) fn check_pending_votes<Tr: Transaction>(
         .copied()
         .unwrap_or(false);
 
-    let finalized_lead_exists = state.blocks.keys().any(|key| {
-        key.type_ == BlockType::Lead && key.view == current_view && state.finalized.contains(key)
-    });
-
-    let unfinalized_lead_exists = state
+    let unfinalized_lead_empty = state
         .unfinalized_lead_by_view
         .get(&current_view)
-        .map(|blocks| !blocks.is_empty())
-        .unwrap_or(false);
+        .map_or(true, |set| set.is_empty());
 
-    // Per the paper: can vote for TR blocks if:
-    // 1. No leader blocks seen at all (quiet leader case), OR
-    // 2. Leader blocks exist, at least one is finalized, and none are unfinalized
-    let can_vote_for_tr_blocks =
-        !contains_lead || (finalized_lead_exists && !unfinalized_lead_exists);
+    // Process transaction block votes if:
+    // 1. Leader blocks exist and are finalized (high throughput mode), OR
+    // 2. No leader blocks exist (low throughput mode)
+    // This allows the protocol to function even when the leader is inactive
+    let can_vote_for_tr_blocks = (contains_lead && unfinalized_lead_empty) || (!contains_lead && current_view == ViewNum(0));
 
     if can_vote_for_tr_blocks {
         // Check for eligible 1-votes on transaction blocks
@@ -195,6 +197,9 @@ pub(crate) fn check_pending_votes<Tr: Transaction>(
             }
         }
     }
+
+    // Clear the dirty flag after processing (matching original implementation)
+    effects.push(Effect::PendingVotesDirtyCleared { view: current_view });
 
     Ok(effects)
 }

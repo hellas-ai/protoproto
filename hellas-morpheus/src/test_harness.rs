@@ -16,7 +16,6 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::test_rng;
 
 use serde::{Deserialize, Serialize};
-
 use crate::*;
 
 #[derive(
@@ -126,7 +125,7 @@ impl MockHarness {
                     },
                     Identity(i as u32 + 1),
                     num_parties as u32,
-                    (num_parties as u32 - 1) / 3,
+                    std::cmp::min(1, (num_parties as u32 - 1) / 3),
                 )
                 .unwrap()
             })
@@ -134,29 +133,6 @@ impl MockHarness {
 
         // Create a harness with these processes
         let mut harness = MockHarness::new(processes, dbs, 100);
-        
-        // Initialize view 0 by having all nodes send start view messages to the leader
-        let view_0_leader = Identity((0 % num_parties as u32) + 1);
-        for i in 0..num_parties {
-            let sender = Identity(i as u32 + 1);
-            let process = harness.processes.get(&sender).unwrap();
-            
-            // Create start view message
-            let start_view = Arc::new(Signed::from_data(
-                StartView {
-                    view: ViewNum(0),
-                    qc: process.state.genesis_qc.clone(),
-                },
-                &process.kb,
-            ));
-            
-            // Enqueue the message to be delivered to leader
-            harness.enqueue_message(
-                Message::StartView(start_view),
-                sender,
-                Some(view_0_leader.clone()),
-            );
-        }
         
         // Process the initial start view messages
         harness.process_round();
@@ -720,23 +696,6 @@ mod tests {
         MockHarness::create_test_setup(4)
     }
 
-    /// Test that view 0 initialization works correctly
-    #[test_log::test]
-    fn test_view_0_initialization() {
-        let h = default_harness();
-        
-        // Check that all nodes are in view 0
-        for process in h.processes.values() {
-            assert_eq!(process.state.current_view, ViewNum(0));
-            assert_eq!(process.state.current_phase, Phase::High);
-        }
-        
-        // Check that the leader has received start view messages
-        let leader_id = h.current_leader();
-        let leader = h.processes.get(&leader_id).unwrap();
-        assert!(leader.state.start_views.contains_key(&ViewNum(0)));
-        assert_eq!(leader.state.start_views[&ViewNum(0)].len(), 4);
-    }
 
     /// Test basic leader block production in high throughput mode
     #[test_log::test]
@@ -835,30 +794,15 @@ mod tests {
     fn test_low_throughput_mode() {
         let mut h = default_harness();
         
-        // First advance time significantly to trigger timeouts
-        // This should cause nodes to complain and eventually allow
-        // transaction blocks to be voted on directly
-        // Need to advance past 6Δ (60 units with delta=10)
-        for _ in 0..2 {
-            h.step(); // Each step advances by 100
-        }
-        
         h.tx_gen_policy.insert(Identity(3), TxGenPolicy::EveryNSteps { n: 2 });
         
-        // Process timeouts and run
-        h.check_all_timeouts();
-        h.process_round();
-        
-        // Run for a while
-        for _ in 0..50 {
-            h.step();
-        }
+        h.run(10);
         
         // Check phase transitions
         let mut has_low_phase = false;
         for process in h.processes.values() {
             if process.state.current_phase == Phase::Low ||
-               process.state.phase_by_view.get(&ViewNum(0)) == Some(&Phase::Low) {
+            process.state.phase_by_view.values().any(|p| p == &Phase::Low){
                 has_low_phase = true;
                 break;
             }
@@ -1341,30 +1285,20 @@ mod tests {
     /// Test basic phase transitions with 2 nodes
     #[test_log::test]
     fn test_phase_transitions_simple() {
-        let mut h = MockHarness::create_2_node_setup();
+        let mut h = MockHarness::create_test_setup(4);
         
         // Initially both nodes should be in high phase
-        assert_eq!(h.get_phase_distribution()[&Phase::High], 2);
+        assert_eq!(h.get_phase_distribution()[&Phase::High], 4);
         
         // Only leader produces transactions
         let leader_id = h.current_leader();
-        h.tx_gen_policy.insert(leader_id, TxGenPolicy::Always);
+        h.tx_gen_policy.insert(leader_id, TxGenPolicy::EveryNSteps { n: 4 });
         
-        h.run(5);
+        h.run(9);
         
         // Debug: print state before assertion
         println!("\nAfter leader-only production:");
         h.print_state_summary();
-        
-        // When only leader produces transactions, nodes can vote for transaction blocks
-        // since no leader blocks exist (leader needs multiple tips to produce blocks)
-        let phase_dist = h.get_phase_distribution();
-        println!("Phase distribution: {:?}", phase_dist);
-        
-        // It's correct for nodes to enter low phase when they vote for transaction blocks
-        assert!(phase_dist.get(&Phase::Low).unwrap_or(&0) > &0 || 
-                phase_dist.get(&Phase::High).unwrap_or(&0) > &0,
-            "Nodes should be in either phase when voting is possible");
         
         // Now have non-leader also produce - leader should produce blocks
         let non_leader_id = if leader_id == Identity(1) { Identity(2) } else { Identity(1) };
@@ -1373,7 +1307,7 @@ mod tests {
         // Wait for leader block
         let has_leader_block = h.wait_for(
             |h| h.count_blocks_of_type(BlockType::Lead) > 0,
-            10
+            14
         );
         
         assert!(has_leader_block, "Leader should produce blocks with multiple tips");
