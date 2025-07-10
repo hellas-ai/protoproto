@@ -38,7 +38,6 @@ pub mod fast_unlock;
 pub mod negotiation;
 pub mod objects;
 pub mod observability;
-pub mod parallel;
 pub mod transactions;
 pub mod types;
 

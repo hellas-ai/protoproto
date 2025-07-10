@@ -3,6 +3,10 @@ name = "hellas-node"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "integration_test"
+path = "examples/integration_test.rs"
+
 [dependencies]
 hellas-morpheus = { path = "../hellas-morpheus" }
 hellas-protocol = { path = "../hellas-protocol" }
@@ -37,6 +41,8 @@ redb = "2"
 
 # Crypto (for test keybook)
 ark-std = "0.4"
+ark-serialize = "0.4"
+rand = "0.8"
 
 # For web targets
 [target.'cfg(target_arch = "wasm32")'.dependencies]

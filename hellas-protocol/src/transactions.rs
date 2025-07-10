@@ -91,8 +91,64 @@ impl SignedTransaction {
 
     /// Compute the digest of this transaction for signing
     pub fn digest(&self) -> TransactionDigest {
-        let bytes = bincode::serialize(self).unwrap();
+        let bytes = postcard::to_vec(self).unwrap();
         Hash::compute(&bytes)
+    }
+}
+
+impl Default for SignedTransaction {
+    fn default() -> Self {
+        Self {
+            signer: Pubkey::default(),
+            signature: Signature::dummy(),
+            additional_signatures: None,
+            transaction: Transaction::CreateAccount { initial_balance: Amount::ZERO },
+            input_objects: vec![],
+            nonce: 0,
+        }
+    }
+}
+
+/// Authority signature on a transaction (from a validator)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthoritySignature {
+    pub validator: Pubkey,
+    pub signature: Signature,
+}
+
+/// A transaction certificate - proof that 2f+1 validators have signed a transaction
+/// This corresponds to step 3 in the Sui Lutris protocol
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionCertificate {
+    /// The signed transaction
+    pub transaction: SignedTransaction,
+    
+    /// Signatures from validators forming a quorum
+    pub auth_signatures: Vec<AuthoritySignature>,
+}
+
+impl TransactionCertificate {
+    /// Get the digest of the underlying transaction
+    pub fn digest(&self) -> TransactionDigest {
+        self.transaction.digest()
+    }
+}
+
+/// An effects certificate - proof that 2f+1 validators have executed a transaction
+/// This provides finality for owned objects and settlement for all objects
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectsCertificate {
+    /// The transaction effects
+    pub effects: TransactionEffects,
+    
+    /// Signatures from validators forming a quorum
+    pub auth_signatures: Vec<AuthoritySignature>,
+}
+
+impl EffectsCertificate {
+    /// Get the digest of the underlying effects
+    pub fn digest(&self) -> Hash {
+        self.effects.digest()
     }
 }
 
@@ -185,8 +241,11 @@ pub struct TransactionEffects {
     /// Objects that were consumed (at specific versions)
     pub consumed_objects: Vec<ObjectRef>,
 
-    /// Objects that were created or modified
+    /// Objects that were created
     pub created_objects: Vec<ObjectId>,
+    
+    /// Objects that were mutated (new versions)
+    pub mutated_objects: Vec<ObjectRef>,
 
     /// Whether the transaction succeeded
     pub success: bool,
@@ -199,6 +258,27 @@ pub struct TransactionEffects {
 }
 
 impl TransactionEffects {
+    /// Create a new effects structure
+    pub fn new(
+        transaction_digest: TransactionDigest,
+        consumed_objects: Vec<ObjectRef>,
+        created_objects: Vec<ObjectId>,
+        mutated_objects: Vec<ObjectRef>,
+        success: bool,
+        error: Option<String>,
+        gas_used: u64,
+    ) -> Self {
+        Self {
+            transaction_digest,
+            consumed_objects,
+            created_objects,
+            mutated_objects,
+            success,
+            error,
+            gas_used,
+        }
+    }
+
     /// Create effects for a successful transaction
     pub fn success(
         transaction_digest: TransactionDigest,
@@ -206,26 +286,34 @@ impl TransactionEffects {
         created_objects: Vec<ObjectId>,
         gas_used: u64,
     ) -> Self {
-        Self {
+        Self::new(
             transaction_digest,
             consumed_objects,
             created_objects,
-            success: true,
-            error: None,
+            vec![],
+            true,
+            None,
             gas_used,
-        }
+        )
     }
 
     /// Create effects for a failed transaction
     pub fn failure(transaction_digest: TransactionDigest, error: String, gas_used: u64) -> Self {
-        Self {
+        Self::new(
             transaction_digest,
-            consumed_objects: vec![],
-            created_objects: vec![],
-            success: false,
-            error: Some(error),
+            vec![],
+            vec![],
+            vec![],
+            false,
+            Some(error),
             gas_used,
-        }
+        )
+    }
+    
+    /// Get the digest of these effects
+    pub fn digest(&self) -> Hash {
+        let bytes = postcard::to_vec(self).unwrap();
+        Hash::compute(&bytes)
     }
 }
 

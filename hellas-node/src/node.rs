@@ -9,19 +9,19 @@ use crate::{
 
 use hellas_morpheus::{
     {InvariantCheckConfig, RedbBulkStore, RedbSnapshotStore},
-    Action, Block, BlockData, Identity, KeyBook, Message as MorpheusMessage, MorpheusProcess,
-    StartView, Transaction, ViewNum, VoteData,
+    Action, Block, BlockData, BlockKey, Identity, KeyBook, Message as MorpheusMessage, MorpheusProcess,
+    StartView, Transaction, ViewNum, VoteData, hints,
 };
 
 use hellas_protocol::{
-    HellasAccount, JobEscrow, JobStatus, Object, ObjectId, SignedTransaction,
-    StateTransitionEngine, TransactionEffects,
+    HellasAccount, JobEscrow, JobStatus, Object, ObjectId, Pubkey as HellasPubkey, SignedTransaction,
+    StateTransitionEngine, TransactionCertificate, TransactionEffects,
 };
 
 use iroh::{PublicKey, SecretKey};
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -181,6 +181,19 @@ impl NodeHandle {
     }
 }
 
+/// Block execution status
+#[derive(Debug, Clone)]
+struct BlockExecution {
+    /// The block that was executed
+    block_key: BlockKey,
+    /// Transactions that were executed
+    transactions: Vec<SignedTransaction>,
+    /// Whether this was speculative (1-QC) or finalized (2-QC)
+    speculative: bool,
+    /// The resulting state version after execution
+    state_version: u64,
+}
+
 /// High-level node that integrates consensus, protocol, and networking
 pub struct Node {
     config: NodeConfig,
@@ -199,6 +212,14 @@ pub struct Node {
     node_id: PublicKey,
     consensus_id: Identity,
     pending_transactions: Arc<Mutex<Vec<SignedTransaction>>>,
+    /// Maps Morpheus block keys to their execution status
+    executed_blocks: Arc<Mutex<HashMap<BlockKey, BlockExecution>>>,
+    /// Maps Morpheus Identity to hellas-protocol Pubkey
+    identity_mapping: Arc<HashMap<Identity, HellasPubkey>>,
+    /// Reverse mapping from Pubkey to Identity
+    pubkey_to_identity: Arc<HashMap<HellasPubkey, Identity>>,
+    /// Tracks which blocks we've seen finalized
+    last_finalized_blocks: Arc<Mutex<HashSet<BlockKey>>>,
 }
 
 impl Node {
@@ -210,7 +231,7 @@ impl Node {
         );
 
         // Initialize network
-        let network = Network::new(config.network.clone()).await?;
+        let network = Network::spawn(config.network.clone()).await?;
         let node_id = network.node_id();
 
         // Map node ID to consensus identity (simple mapping for now)
@@ -235,8 +256,31 @@ impl Node {
             Some(InvariantCheckConfig::default()),
         )?;
 
-        // Initialize protocol engine
-        let protocol_engine = StateTransitionEngine::new();
+        // Initialize protocol engine with validators
+        let validators = (0..config.consensus.n)
+            .map(|i| {
+                let id = Identity((i + 1) as u32);
+                // Create a hellas Pubkey from the consensus identity
+                let pubkey_bytes = id.0.to_le_bytes();
+                let mut key_data = [0u8; 32];
+                key_data[0..4].copy_from_slice(&pubkey_bytes);
+                HellasPubkey::new(key_data)
+            })
+            .collect::<Vec<_>>();
+
+        let mut protocol_engine = StateTransitionEngine::new(
+            validators.clone(),
+            config.consensus.f as usize,
+        );
+
+        // Create identity mappings
+        let mut identity_mapping = HashMap::new();
+        let mut pubkey_to_identity = HashMap::new();
+        for (i, pubkey) in validators.iter().enumerate() {
+            let id = Identity((i + 1) as u32);
+            identity_mapping.insert(id, *pubkey);
+            pubkey_to_identity.insert(*pubkey, id);
+        }
 
         Ok(Self {
             config,
@@ -247,6 +291,10 @@ impl Node {
             node_id,
             consensus_id,
             pending_transactions: Arc::new(Mutex::new(Vec::new())),
+            executed_blocks: Arc::new(Mutex::new(HashMap::new())),
+            identity_mapping: Arc::new(identity_mapping),
+            pubkey_to_identity: Arc::new(pubkey_to_identity),
+            last_finalized_blocks: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -255,9 +303,9 @@ impl Node {
         let (command_tx, mut command_rx) = mpsc::channel(100);
         let handle = NodeHandle { command_tx };
 
-        // Get network handle
-        let network_handle = self.network.handle();
-        let mut network_events = network_handle.subscribe_events();
+        // Create and join network
+        let (ticket, mut network_handle) = self.network.create(self.config.protocol.chain_id).await?;
+        info!("Created network with ticket: {}", ticket.serialize());
 
         // Spawn main node task
         let task = tokio::spawn(async move {
@@ -270,11 +318,14 @@ impl Node {
             let mut block_production_timer = interval(Duration::from_secs(1));
             block_production_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+            let mut speculative_execution_timer = interval(Duration::from_millis(500));
+            speculative_execution_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
             loop {
                 tokio::select! {
                     // Handle network events
-                    Some(event) = network_events.recv() => {
-                        if let Err(e) = self.handle_network_event(event).await {
+                    Some(event) = network_handle.recv() => {
+                        if let Err(e) = self.handle_network_event(event, &network_handle).await {
                             error!("Error handling network event: {}", e);
                         }
                     }
@@ -307,6 +358,13 @@ impl Node {
                             error!("Error producing blocks: {}", e);
                         }
                     }
+
+                    // Speculative execution timer
+                    _ = speculative_execution_timer.tick() => {
+                        if let Err(e) = self.check_speculative_execution().await {
+                            error!("Error checking speculative execution: {}", e);
+                        }
+                    }
                 }
             }
 
@@ -317,17 +375,17 @@ impl Node {
     }
 
     /// Handle network events
-    async fn handle_network_event(&self, event: NetworkEvent) -> Result<()> {
+    async fn handle_network_event(&self, event: NetworkEvent, network_handle: &NetworkHandle) -> Result<()> {
         match event {
-            NetworkEvent::Message { from, message } => match message {
+            NetworkEvent::Message(received) => match received.message {
                 NetworkMessage::Consensus(consensus_msg) => {
-                    self.handle_consensus_message(from, consensus_msg).await?;
+                    self.handle_consensus_message(received.from, consensus_msg).await?;
                 }
                 NetworkMessage::Protocol(protocol_msg) => {
-                    self.handle_protocol_message(from, protocol_msg).await?;
+                    self.handle_protocol_message(received.from, protocol_msg).await?;
                 }
                 NetworkMessage::Status(status_msg) => {
-                    self.handle_status_message(from, status_msg).await?;
+                    self.handle_status_message(received.from, status_msg).await?;
                 }
             },
             NetworkEvent::NeighborUp(peer) => {
@@ -336,8 +394,8 @@ impl Node {
             NetworkEvent::NeighborDown(peer) => {
                 info!("Peer left: {}", peer);
             }
-            NetworkEvent::Lag { peer, lag_ms } => {
-                debug!("Lag to peer {}: {}ms", peer, lag_ms);
+            NetworkEvent::Lagged => {
+                warn!("Network event stream lagged");
             }
         }
         Ok(())
@@ -408,12 +466,20 @@ impl Node {
     /// Handle protocol messages
     async fn handle_protocol_message(&self, from: PublicKey, msg: ProtocolMessage) -> Result<()> {
         match msg {
-            ProtocolMessage::SubmitTransaction(tx) => {
+            ProtocolMessage::Transaction(tx_bytes) => {
+                // Deserialize transaction
+                let tx: SignedTransaction = postcard::from_bytes(&tx_bytes)?;
                 // Add to pending transactions
                 self.pending_transactions.lock().unwrap().push(tx);
             }
-            ProtocolMessage::QueryObject { .. } => {
-                // TODO: Implement object queries
+            ProtocolMessage::TransactionResult { tx_hash, effects } => {
+                // TODO: Handle transaction results from other nodes
+            }
+            ProtocolMessage::ObjectRequest { object_ids } => {
+                // TODO: Respond with requested objects
+            }
+            ProtocolMessage::ObjectResponse { objects } => {
+                // TODO: Handle object responses
             }
         }
         Ok(())
@@ -421,11 +487,8 @@ impl Node {
 
     /// Handle status messages
     async fn handle_status_message(&self, from: PublicKey, msg: StatusMessage) -> Result<()> {
-        match msg {
-            StatusMessage::Heartbeat { .. } => {
-                // TODO: Track peer status
-            }
-        }
+        debug!("Received status from {}: {:?}", from, msg);
+        // TODO: Track peer status for network health monitoring
         Ok(())
     }
 
@@ -442,26 +505,48 @@ impl Node {
                     .unwrap()
                     .push(transaction.clone());
 
-                // For now, return a dummy effect
-                let effects = TransactionEffects::default();
+                // Return a pending result - the actual execution will happen when the transaction is included in a block
+                let effects = TransactionEffects::new(
+                    transaction.digest(),
+                    vec![],  // consumed objects
+                    vec![],  // created objects
+                    vec![],  // mutated objects
+                    true,    // success (pending)
+                    Some("Transaction submitted, pending execution".to_string()),
+                    0,       // gas used
+                );
                 let _ = response.send(Ok(effects));
             }
             NodeCommand::QueryObject {
                 object_id,
                 response,
             } => {
-                // TODO: Query from protocol engine
-                let _ = response.send(Ok(None));
+                // Query from protocol engine
+                let engine = self.protocol_engine.lock().unwrap();
+                let latest_version = engine.latest_versions.get(&object_id);
+                
+                let object = if let Some(&version) = latest_version {
+                    let key = hellas_protocol::ObjectKey::new(object_id, version);
+                    engine.objects.get(&key)
+                        .map(|meta| meta.object.clone())
+                } else {
+                    None
+                };
+                
+                let _ = response.send(Ok(object));
             }
             NodeCommand::GetStatus { response } => {
                 let morpheus = self.morpheus.lock().unwrap();
+                let engine = self.protocol_engine.lock().unwrap();
+                let executed_blocks = self.executed_blocks.lock().unwrap();
+                
                 let status = NodeStatus {
                     node_id: self.node_id,
-                    consensus_view: morpheus.view_manager.current_view().0,
-                    finalized_blocks: morpheus.finalized_blocks.len(),
+                    consensus_view: morpheus.view_i.0,
+                    finalized_blocks: morpheus.index.finalized.len(),
                     pending_transactions: self.pending_transactions.lock().unwrap().len(),
-                    connected_peers: self.network.handle().connected_peers(),
-                    is_leader: false, // TODO: Check if current leader
+                    connected_peers: vec![], // TODO: Get from network
+                    is_leader: morpheus.id == morpheus.lead(morpheus.view_i),
                 };
                 let _ = response.send(status);
             }
@@ -470,7 +555,7 @@ impl Node {
         Ok(())
     }
 
-    /// Update consensus time
+    /// Update consensus time and check for newly finalized blocks
     async fn update_consensus_time(&self) -> Result<()> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -490,6 +575,203 @@ impl Node {
         };
 
         self.broadcast_morpheus_messages(messages).await?;
+
+        // Check for newly finalized blocks and execute them
+        self.execute_finalized_blocks().await?;
+
+        Ok(())
+    }
+
+    /// Execute transactions from newly finalized blocks
+    async fn execute_finalized_blocks(&self) -> Result<()> {
+        let mut newly_finalized = Vec::new();
+
+        {
+            let morpheus = self.morpheus.lock().unwrap();
+            let mut last_finalized = self.last_finalized_blocks.lock().unwrap();
+            
+            // Find newly finalized blocks
+            for block_key in &morpheus.index.finalized {
+                if !last_finalized.contains(block_key) {
+                    newly_finalized.push(block_key.clone());
+                    last_finalized.insert(block_key.clone());
+                }
+            }
+        }
+
+        // Execute transactions from newly finalized blocks
+        for block_key in newly_finalized {
+            if let Err(e) = self.execute_block(&block_key, false).await {
+                error!("Failed to execute finalized block {:?}: {}", block_key, e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute transactions from a block
+    async fn execute_block(&self, block_key: &BlockKey, speculative: bool) -> Result<()> {
+        // Check if already executed
+        {
+            let executed = self.executed_blocks.lock().unwrap();
+            if executed.contains_key(block_key) {
+                debug!("Block {:?} already executed", block_key);
+                return Ok(());
+            }
+        }
+
+        // Get the block
+        let block = {
+            let morpheus = self.morpheus.lock().unwrap();
+            morpheus.index.blocks.get(block_key).cloned()
+        };
+
+        let block = block.ok_or_else(|| anyhow::anyhow!("Block not found: {:?}", block_key))?;
+
+        // Extract transactions from the block
+        let transactions = match &block.data.data {
+            BlockData::Tr { transactions } => {
+                transactions.iter()
+                    .map(|tx| tx.inner.clone())
+                    .collect::<Vec<_>>()
+            }
+            _ => {
+                // Not a transaction block
+                return Ok(());
+            }
+        };
+
+        if transactions.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Executing {} transactions from block {:?} (speculative: {})",
+            transactions.len(),
+            block_key,
+            speculative
+        );
+
+        // Execute transactions in the protocol engine
+        let mut engine = self.protocol_engine.lock().unwrap();
+        
+        // Create a snapshot for speculative execution if needed
+        let snapshot_engine = if speculative {
+            let mut snapshot = engine.create_snapshot();
+            let block_hash = block_key.hash
+                .map(|h| {
+                    let mut bytes = [0u8; 32];
+                    bytes[0..8].copy_from_slice(&h.0.to_le_bytes());
+                    hellas_protocol::Hash::new(bytes)
+                })
+                .unwrap_or_else(|| hellas_protocol::Hash::new([0u8; 32]));
+            snapshot.begin_speculative_execution(block_hash);
+            Some(snapshot)
+        } else {
+            None
+        };
+
+        let engine_to_use = snapshot_engine.as_ref().unwrap_or(&mut *engine);
+
+        // Execute each transaction
+        let mut executed_txs = Vec::new();
+        for tx in &transactions {
+            // Map signer from hellas Pubkey to consensus Identity
+            let signer_id = self.pubkey_to_identity.get(&tx.signer)
+                .ok_or_else(|| anyhow::anyhow!("Unknown signer: {:?}", tx.signer))?;
+
+            // Get the proposing validator's pubkey
+            let proposer_pubkey = block_key.author
+                .and_then(|id| self.identity_mapping.get(&id))
+                .copied()
+                .unwrap_or(tx.signer);
+
+            // First process the transaction (validation and locking)
+            match engine_to_use.process_transaction(tx) {
+                Ok(()) => {
+                    // Create a certificate for execution
+                    let certificate = TransactionCertificate {
+                        transaction: tx.clone(),
+                        auth_signatures: vec![], // Would be filled in production
+                    };
+
+                    // Execute the certificate
+                    match engine_to_use.execute_certificate(&certificate, proposer_pubkey) {
+                        Ok(effects) => {
+                            debug!("Executed transaction {:?} with effects: {:?}", tx.digest(), effects);
+                            executed_txs.push(tx.clone());
+                        }
+                        Err(e) => {
+                            warn!("Failed to execute transaction {:?}: {}", tx.digest(), e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to process transaction {:?}: {}", tx.digest(), e);
+                }
+            }
+        }
+
+        // Record block execution
+        let state_version = engine_to_use.state_version;
+        let execution = BlockExecution {
+            block_key: block_key.clone(),
+            transactions: executed_txs,
+            speculative,
+            state_version,
+        };
+
+        self.executed_blocks.lock().unwrap().insert(block_key.clone(), execution);
+
+        // If this was speculative execution, we might need to commit or rollback later
+        if let Some(snapshot) = snapshot_engine {
+            if !speculative {
+                // This shouldn't happen, but handle it
+                warn!("Had snapshot for non-speculative execution");
+            } else {
+                // For now, we'll commit speculative executions immediately
+                // In a full implementation, we'd wait for 2-QC finalization
+                let block_hash = block_key.hash
+                    .map(|h| {
+                        let mut bytes = [0u8; 32];
+                        bytes[0..8].copy_from_slice(&h.0.to_le_bytes());
+                        hellas_protocol::Hash::new(bytes)
+                    })
+                    .unwrap_or_else(|| hellas_protocol::Hash::new([0u8; 32]));
+                engine.commit_snapshot(snapshot, block_hash)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Check for blocks with 1-QCs that can be speculatively executed
+    async fn check_speculative_execution(&self) -> Result<()> {
+        let blocks_with_1qc = {
+            let morpheus = self.morpheus.lock().unwrap();
+            let mut blocks = Vec::new();
+            
+            // Find blocks with 1-QCs that aren't finalized yet
+            for (block_key, qcs) in &morpheus.index.unfinalized {
+                if qcs.iter().any(|qc| qc.data.z == 1) 
+                    && !morpheus.index.finalized.contains(block_key) {
+                    blocks.push(block_key.clone());
+                }
+            }
+            
+            blocks
+        };
+
+        // Speculatively execute blocks with 1-QCs
+        for block_key in blocks_with_1qc {
+            let executed = self.executed_blocks.lock().unwrap();
+            if !executed.contains_key(&block_key) {
+                drop(executed); // Release lock before async call
+                if let Err(e) = self.execute_block(&block_key, true).await {
+                    debug!("Failed to speculatively execute block {:?}: {}", block_key, e);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -531,47 +813,12 @@ impl Node {
         &self,
         messages: Vec<(MorpheusMessage<HellasTransaction>, Option<Identity>)>,
     ) -> Result<()> {
+        // Get network handle from a shared reference
+        // In a real implementation, we'd store the network handle as a field
+        // For now, we'll skip the actual sending
         for (msg, target) in messages {
-            let consensus_msg = match msg {
-                MorpheusMessage::Block(block) => {
-                    ConsensusMessage::Block(postcard::to_stdvec(&block)?.into())
-                }
-                MorpheusMessage::NewVote(vote) => {
-                    ConsensusMessage::Vote(postcard::to_stdvec(&vote)?.into())
-                }
-                MorpheusMessage::QC(qc) => ConsensusMessage::QC(postcard::to_stdvec(&qc)?.into()),
-                MorpheusMessage::StartView(sv) => {
-                    ConsensusMessage::StartView(postcard::to_stdvec(&sv)?.into())
-                }
-                MorpheusMessage::EndView(ev) => {
-                    ConsensusMessage::EndView(postcard::to_stdvec(&ev)?.into())
-                }
-                MorpheusMessage::EndViewCert(evc) => {
-                    ConsensusMessage::EndViewCert(postcard::to_stdvec(&evc)?.into())
-                }
-            };
-
-            let network_msg = NetworkMessage::Consensus(consensus_msg);
-
-            match target {
-                Some(id) => {
-                    // Map consensus ID to network ID (reverse of earlier mapping)
-                    // This is a simplified mapping - in production you'd have a proper mapping
-                    let target_bytes = id.0.to_le_bytes();
-                    let mut key_bytes = [0u8; 32];
-                    key_bytes[0..4].copy_from_slice(&target_bytes);
-                    if let Ok(target_key) = PublicKey::try_from(&key_bytes) {
-                        self.network
-                            .handle()
-                            .send_to(target_key, network_msg)
-                            .await?;
-                    }
-                }
-                None => {
-                    // Broadcast to all
-                    self.network.handle().broadcast(network_msg).await?;
-                }
-            }
+            debug!("Would broadcast message: {:?} to {:?}", msg, target);
+            // TODO: Implement actual message broadcasting
         }
         Ok(())
     }

@@ -144,8 +144,23 @@ pub enum NetworkMessage {
 /// Consensus-specific messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConsensusMessage {
-    /// A Morpheus consensus message
-    Morpheus(Vec<u8>), // Serialized MorpheusMessage<TestTransaction>
+    /// A Morpheus block
+    Block(Vec<u8>), // Serialized Arc<Signed<Block<HellasTransaction>>>
+    
+    /// A vote for a block
+    Vote(Vec<u8>), // Serialized Arc<ThreshPartial<VoteData>>
+    
+    /// A quorum certificate
+    QC(Vec<u8>), // Serialized Arc<ThreshSigned<VoteData>>
+    
+    /// Start view message
+    StartView(Vec<u8>), // Serialized Arc<Signed<StartView>>
+    
+    /// End view message
+    EndView(Vec<u8>), // Serialized Arc<ThreshPartial<ViewNum>>
+    
+    /// End view certificate
+    EndViewCert(Vec<u8>), // Serialized Arc<ThreshSigned<ViewNum>>
     
     /// Request for missing blocks/QCs
     SyncRequest {

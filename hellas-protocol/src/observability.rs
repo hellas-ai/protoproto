@@ -183,6 +183,16 @@ pub fn record_cache_access(hit: bool) {
     }
 }
 
+/// Record a generic operation
+pub fn record_operation(operation: &str, success: bool, duration: f64) {
+    let labels = vec![
+        ("operation", operation.to_string()),
+        ("success", success.to_string()),
+    ];
+    counter!("hellas_operations_total", 1, &labels);
+    histogram!("hellas_operation_duration_seconds", duration, &labels);
+}
+
 /// Start Prometheus metrics exporter
 pub fn start_metrics_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
