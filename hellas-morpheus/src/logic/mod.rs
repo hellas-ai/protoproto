@@ -9,20 +9,20 @@
 
 // Export all submodules
 pub(crate) mod actions;
-pub(crate) mod block_producer;
+pub(crate) mod block_production;
 pub(crate) mod block_validation;
 pub(crate) mod effects;
 pub(crate) mod processor;
-pub(crate) mod timeout_manager;
-pub(crate) mod view_manager;
-pub(crate) mod vote_manager;
+pub(crate) mod state;
+pub(crate) mod view_management;
+pub(crate) mod voting;
 
 // Re-export commonly used items
 pub use actions::*;
-pub use block_producer::*;
+pub(crate) use block_production::*;
 pub use block_validation::*;
 pub use effects::*;
-pub use processor::process_action;
-pub use timeout_manager::*;
-pub use view_manager::*;
-pub use vote_manager::*;
+pub use processor::*;
+pub use state::*;
+pub(crate) use view_management::*;
+pub(crate) use voting::*;

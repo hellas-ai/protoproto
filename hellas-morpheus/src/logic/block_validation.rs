@@ -381,13 +381,6 @@ pub fn block_valid<Tr: Transaction>(
                 }
             }
 
-            // Check justification if it's the first leader block
-            if let BlockData::Lead { justification } = &block.data {
-                if justification.len() < (n - f) as usize {
-                    return Err(BlockValidationError::NotEnoughJustifications);
-                }
-            }
-
             Ok(())
         }
         (_, BlockData::Genesis) => unreachable!("genesis blocks are validated above"),

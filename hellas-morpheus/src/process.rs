@@ -6,11 +6,10 @@
 //! 3. Applies effects to mutate state
 //! 4. Handles persistence via Storage
 
-use crate::state::ProcessState;
-use crate::storage::Storage;
+use crate::logic::*;
 use crate::*;
 use fastbloom::BloomFilter;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 #[derive(Clone, derivative::Derivative)]
@@ -27,10 +26,6 @@ pub struct MorpheusProcess<Tr: Transaction> {
     // The single source of truth for all protocol state
     pub state: ProcessState<Tr>,
 
-    // Persistence layer
-    #[derivative(Debug = "ignore")]
-    pub storage: Storage<Tr>,
-
     // Message deduplication (kept separate as it's not protocol state)
     pub seen_messages: BloomFilter,
     pub seen_message_hashes: BTreeSet<[u8; 32]>,
@@ -39,15 +34,11 @@ pub struct MorpheusProcess<Tr: Transaction> {
 impl<Tr: Transaction> MorpheusProcess<Tr> {
     /// Create a new process
     pub fn new(
-        db: Arc<redb::Database>,
         keybook: KeyBook,
         id: Identity,
         n: u32,
         f: u32,
     ) -> Result<Self, String> {
-        // Register with tracing
-        crate::tracing_setup::register_process(&id, n, f);
-
         // Create genesis block and QC
         let genesis_block = Arc::new(Signed {
             data: Block {
@@ -77,9 +68,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         // Create unified state
         let state = ProcessState::new(genesis_block.clone(), genesis_qc.clone());
 
-        // Create storage
-        let storage = Storage::new(db, genesis_block.clone(), genesis_qc.clone())?;
-
         Ok(Self {
             kb: keybook,
             chainid: [0; 32],
@@ -88,7 +76,6 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             f,
             delta: 10,
             state,
-            storage,
             seen_messages: BloomFilter::with_num_bits(8 * 1024 * 16)
                 .seed(&0x8F3A57D2C19E4B7F0123456789ABCDEF)
                 .expected_items(100_000),
@@ -97,22 +84,23 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
     }
 
     /// Process a message - main entry point
+    #[tracing::instrument(skip(self, message, sender), fields(process_id = ?self.id.0))]
     pub fn process_message(
         &mut self,
         message: Message<Tr>,
         sender: Identity,
     ) -> Result<Vec<(Message<Tr>, Option<Identity>)>, String> {
         // Deduplication
-        if !self.storage.journal.replaying && self.seen_messages.contains(&message) {
+        if self.seen_messages.contains(&message) {
             let bytes = postcard::to_stdvec(&message).unwrap();
             let hash = blake3::hash(&bytes);
             if self.seen_message_hashes.contains(hash.as_bytes()) {
-                tracing::error!(
-                    target: "duplicate_message",
-                    sender = ?sender,
-                    full_message = format::format_message(&message, false),
-                    "Ignoring duplicate message"
-                );
+                // tracing::error!(
+                //     target: "duplicate_message",
+                //     sender = ?sender,
+                //     full_message = format::format_message(&message, false),
+                //     "Ignoring duplicate message"
+                // );
                 return Ok(Vec::new());
             }
         }
@@ -153,13 +141,14 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         self.handle_action(Action::CheckProduceBlocks)
     }
 
-    /// Handle an action using the Action/Effect pattern
+    /// Handle an action using the Action/Effect pattern with proper effect queue
+    #[tracing::instrument(skip(self), fields(id = self.id.0))]
     fn handle_action(
         &mut self,
         action: Action<Tr>,
     ) -> Result<Vec<(Message<Tr>, Option<Identity>)>, String> {
-        // Step 1: Process the action with pure logic to get effects
-        let effects = crate::logic::process_action(
+        // Step 1: Initialize effect queue with initial effects
+        let initial_effects = crate::logic::process_action(
             &self.state,
             &action,
             &self.kb,
@@ -167,27 +156,146 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
             self.n,
             self.f,
             self.delta,
-        );
+        )
+        .map_err(|e| format!("Processing error: {}", e))?;
 
-        // Step 2: Apply effects to mutate state and collect messages
+        let mut effect_queue: VecDeque<Effect<Tr>> = initial_effects.into();
         let mut messages = Vec::new();
-        for effect in &effects {
-            // Apply to our in-memory state
-            self.state.apply(effect, &self.id, self.n, self.f);
 
-            // Collect any outgoing messages
-            messages.extend(self.process_effect_for_messages(effect)?);
+        // Step 2: Process effects until queue is empty
+        while let Some(effect) = effect_queue.pop_front() {
+            // Apply effect immediately to update state
+            self.state.apply(&effect, &self.id);
 
-            // Apply to storage if needed
-            self.apply_effect_to_storage(effect)?;
+            // Generate any outgoing messages from this effect
+            messages.extend(self.process_effect_for_messages(&effect)?);
+
+            // Check for consequential effects after state change
+            let consequential_effects = self
+                .check_consequential_effects(&effect)
+                .map_err(|e| format!("Processing consequential effects: {}", e))?;
+
+            // Add any new effects to the back of the queue
+            for new_effect in consequential_effects {
+                effect_queue.push_back(new_effect);
+            }
         }
 
-        // Step 3: Record in journal for replay
-        self.storage
-            .journal
-            .record(action, effects, self.state.current_time)?;
-
         Ok(messages)
+    }
+
+    /// Check for effects that are triggered as a consequence of the applied effect
+    fn check_consequential_effects(&self, effect: &Effect<Tr>) -> Result<Vec<Effect<Tr>>, String> {
+        let mut new_effects = Vec::new();
+
+        match effect {
+            // View certificate formed - check if it triggers view change
+            // QC recorded - check if it enables voting or finalizes blocks
+            Effect::QcRecorded { qc, .. } => {
+                // First check if max_view has advanced beyond current view (like reference implementation)
+                if self.state.max_view.0 > self.state.current_view {
+                    // Need to catch up to the max view we've seen
+                    new_effects.extend(
+                        trigger_view_change(&self.state, self.state.max_view.0, &self.id, self.n, &self.kb)
+                            .map_err(|e| format!("Triggering view change from max_view: {}", e))?,
+                    );
+                }
+                
+                // Then check pending votes
+                new_effects.extend(
+                    check_pending_votes(&self.state, &self.kb, &self.id, self.n)
+                        .map_err(|e| format!("Checking pending votes: {}", e))?,
+                );
+            }
+
+            // Block recorded - check if it enables voting
+            Effect::BlockRecorded { .. } => {
+                new_effects.extend(
+                    check_pending_votes(&self.state, &self.kb, &self.id, self.n)
+                        .map_err(|e| format!("Checking pending votes: {}", e))?,
+                );
+            }
+
+            // Vote recorded - check if we've reached quorum
+            Effect::VoteRecorded { vote, .. } => {
+                // Check if this vote completes a quorum
+                let vote_count = self
+                    .state
+                    .vote_tracker
+                    .get(&vote.data)
+                    .map(|votes| votes.len())
+                    .unwrap_or(0);
+
+                if vote_count >= (self.n - self.f) as usize {
+                    // We have quorum - form QC
+                    if let Ok(qc) =
+                        form_qc_from_state(&self.state, &vote.data, &self.kb, self.n, self.f)
+                    {
+                        new_effects.push(Effect::QuorumReached { qc_formed: qc });
+                    }
+                }
+            }
+
+            // Vote sent - also record it locally and check for quorum
+            Effect::VoteSent { vote, .. } => {
+                // Record our own vote locally
+                new_effects.push(Effect::VoteRecorded {
+                    voter: self.id.clone(),
+                    vote: vote.clone(),
+                });
+            }
+
+            // End-view vote recorded - check if we can form a view certificate
+            Effect::EndViewRecorded { view, .. } => {
+                // Check if we can form a view certificate
+                if let Ok(Some(cert)) = check_view_cert_formation(&self.state, *view, &self.kb, self.n, self.f) {
+                    new_effects.push(Effect::ViewCertFormed { cert: cert.clone() });
+                    // Also process the certificate to trigger view change
+                    new_effects.extend(
+                        process_end_view_cert(&self.state, &cert, &self.kb, &self.id, self.n, self.f)
+                            .map_err(|e| format!("Processing end-view cert: {}", e))?,
+                    );
+                }
+            }
+
+            // View changed - mark pending votes as dirty for re-evaluation
+            Effect::ViewChanged { new_view, .. } => {
+                // The view change effect itself handles most state updates
+                // But we should check pending votes for the new view
+                // First mark it dirty
+                if let Some(pending) = self.state.pending_votes.get(new_view) {
+                    // We can't mutate here, but the apply already set dirty = true for new views
+                }
+                new_effects.extend(
+                    check_pending_votes(&self.state, &self.kb, &self.id, self.n)
+                        .map_err(|e| format!("Checking pending votes after view change: {}", e))?,
+                );
+            }
+
+            Effect::QuorumReached { qc_formed } => {
+                // Check if we need to broadcast the QC
+                if let Some(author) = &qc_formed.data.for_which.author {
+                    // For 0-QCs, only broadcast if it's our own block
+                    if qc_formed.data.z == 0 && author == &self.id {
+                        new_effects.push(Effect::MessageSent {
+                            message: Message::QC(qc_formed.clone()),
+                            target: None,
+                        });
+                    }
+                }
+
+                // After the QC has been applied to state, check for view changes?
+
+                // Check if this enables any new votes
+                new_effects.extend(
+                    check_pending_votes(&self.state, &self.kb, &self.id, self.n)
+                        .map_err(|e| format!("Checking pending votes: {}", e))?,
+                );
+            }
+            _ => {} // Other effects don't trigger consequential effects
+        }
+
+        Ok(new_effects)
     }
 
     /// Process an effect to generate outgoing messages
@@ -198,86 +306,18 @@ impl<Tr: Transaction> MorpheusProcess<Tr> {
         let mut messages = Vec::new();
 
         match effect {
-            Effect::VoteSent {
-                vote_type,
-                block_key,
-                target,
-            } => {
-                let vote = Arc::new(ThreshPartial::from_data(
-                    VoteData {
-                        z: *vote_type,
-                        for_which: block_key.clone(),
-                    },
-                    &self.kb,
-                ));
-                messages.push((Message::NewVote(vote), target.clone()));
+            Effect::VoteSent { vote, target } => {
+                messages.push((Message::NewVote(vote.clone()), target.clone()));
+            }
+            Effect::BlockProduced { block } => {
+                messages.push((Message::Block(block.clone()), None));
             }
             Effect::MessageSent { message, target } => {
                 messages.push((message.clone(), target.clone()));
-            }
-            Effect::ComplaintSent { qc, target } => {
-                messages.push((Message::QC(qc.clone()), Some(target.clone())));
-            }
-            Effect::EndViewSent { view } => {
-                let end_view = Arc::new(ThreshPartial::from_data(*view, &self.kb));
-                messages.push((Message::EndView(end_view), None));
             }
             _ => {} // Other effects don't generate messages
         }
 
         Ok(messages)
-    }
-
-    /// Apply effects to storage
-    fn apply_effect_to_storage(&mut self, effect: &Effect<Tr>) -> Result<(), String> {
-        match effect {
-            Effect::BlockRecorded { block } => {
-                self.storage.store_block(block)?;
-            }
-            Effect::QcRecorded { qc, .. } => {
-                self.storage.store_qc(qc)?;
-            }
-            Effect::ViewChanged { .. } => {
-                // View changes are handled by ProcessState, storage doesn't need to track this
-            }
-            Effect::BlockProduced {
-                block_key,
-                block_type,
-            } => {
-                crate::tracing_setup::block_created(
-                    &self.id,
-                    if *block_type == BlockType::Lead {
-                        "leader"
-                    } else {
-                        "transaction"
-                    },
-                    block_key,
-                );
-            }
-            _ => {} // Other effects don't affect storage
-        }
-
-        Ok(())
-    }
-
-    /// Replay events from journal to restore state
-    pub fn replay_from_journal(&mut self, start_position: u64) -> Result<(), String> {
-        self.storage
-            .journal
-            .replay_from(start_position, |position, entry| {
-                tracing::info!(
-                    target: "replay",
-                    position = position,
-                    action = ?entry.action,
-                    "Replaying journal entry"
-                );
-
-                // Apply effects to state
-                for effect in &entry.effects {
-                    self.state.apply(effect, &self.id, self.n, self.f);
-                }
-
-                Ok(())
-            })
     }
 }

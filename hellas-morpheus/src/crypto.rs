@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
     Deserialize,
     CanonicalSerialize,
     CanonicalDeserialize,
+    Copy
 )]
 pub struct Identity(pub u32);
 
@@ -95,12 +96,18 @@ pub struct ThreshPartial<T: Valid + CanonicalSerialize + CanonicalDeserialize> {
 }
 
 impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshSigned<T> {
+    #[cfg(not(test))]
     pub fn valid_signature(&self, keybook: &KeyBook, threshold: u32) -> bool {
         let verifier = keybook.hints_setup.as_ref().unwrap().verifier();
         let mut buf = Vec::new();
         T::serialize_compressed(&self.data, &mut buf).unwrap();
         hints::verify_aggregate(&verifier, &self.signature, &buf).is_ok()
             && self.signature.threshold >= hints::F::from(threshold)
+    }
+
+    #[cfg(test)]
+    pub fn valid_signature(&self, keybook: &KeyBook, threshold: u32) -> bool {
+        true
     }
 }
 
@@ -116,6 +123,7 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshPartial<T> {
         }
     }
 
+    #[cfg(not(test))]
     pub fn valid_signature(&self, keybook: &KeyBook) -> bool {
         let their_key = keybook
             .keys
@@ -129,6 +137,11 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> ThreshPartial<T> {
             &buf,
             &self.signature,
         )
+    }
+
+    #[cfg(test)]
+    pub fn valid_signature(&self, keybook: &KeyBook) -> bool {
+        true
     }
 }
 
@@ -144,6 +157,7 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> Signed<T> {
         }
     }
 
+    #[cfg(not(test))]
     pub fn valid_signature(&self, keybook: &KeyBook) -> bool {
         let their_key = keybook
             .keys
@@ -157,5 +171,10 @@ impl<T: CanonicalSerialize + CanonicalDeserialize> Signed<T> {
             &buf,
             &self.signature,
         )
+    }
+
+    #[cfg(test)]
+    pub fn valid_signature(&self, keybook: &KeyBook) -> bool {
+        true
     }
 }

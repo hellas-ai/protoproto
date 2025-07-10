@@ -27,29 +27,22 @@
 //! - `test_harness.rs`: Testing framework for the protocol
 //! - `tracing_setup.rs`: Structured logging with tracing-rs
 
-mod config;
 mod crypto;
 mod logic;
 mod process;
-mod storage;
-mod state;
 mod types;
-
 
 pub mod format;
 pub mod test_harness;
-pub mod tracing_setup;
 
 use std::{fmt::Debug, hash::Hash};
 
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Valid};
 
 pub use crypto::*;
-pub use logic::*;
-pub use process::*;
-pub use state::{ProcessState, PendingVotes};
-pub use storage::*;
 pub use types::*;
+pub use process::*;
+pub use logic::*;
 
 pub trait Transaction:
     Send
